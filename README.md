@@ -12,7 +12,7 @@ Make sure you have Python installed and the required libraries. You can install 
 There are two ways to run the application:
 
 1.  **Directly with Python (Recommended for developers):**
-    `python scrtrans_t.py`
+    `python scrtrans.py`
 
 2.  **Using the VBScript (For ease of use):**
     Double-click the `run_transgemi.vbs` file. This script runs the Python application in the background without opening a console window.
@@ -20,9 +20,16 @@ There are two ways to run the application:
 ### Hotkeys
 -   **`Alt + Q`**: Select a new area on the screen to translate.
 -   **`~`** (Tilde key): Toggle live translation on or off for the selected area.
+-   **`Alt + K`**: Set your Google Gemini API Key. A dialog will appear to paste your key.
+-   **`Alt + L`**: Set the target language for translation (e.g., 'en' for English, 'es' for Spanish).
 -   **`+` / `-`**: Increase or decrease the font size of the translated text.
 -   **`Alt + T`**: Show or hide the translation window.
 -   **`Esc`**: Close the application.
+
+### API Key
+This application requires a Google Gemini API key to function. You can generate a free key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+
+Use the `Alt + K` hotkey to enter your key into the application.
 
 ## How It Works
 The tool captures the selected screen region, sends it to the Gemini AI for translation, and displays the result in a transparent, always-on-top window. It rotates through different Gemini models to manage API rate limits and caches results to improve performance.

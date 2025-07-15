@@ -40,11 +40,15 @@ VK_OEM_PLUS = 0xBB
 VK_OEM_MINUS = 0xBD
 VK_T = 0x54  # 'T' key
 VK_Q = 0x51  # 'Q' key
+VK_K = 0x4B  # 'K' key
+VK_L = 0x4C  # 'L' key
 ALT_T_HOTKEY_ID = 1  # Hotkey ID for Alt+T visibility toggle
 ALT_Q_HOTKEY_ID = 2  # Hotkey ID for Alt+Q select area
 TILDE_HOTKEY_ID = 3  # Hotkey ID for '~' toggle live translation
 PLUS_HOTKEY_ID = 4  # Hotkey ID for '+' increase font size
 MINUS_HOTKEY_ID = 5  # Hotkey ID for '-' decrease font size
+ALT_K_HOTKEY_ID = 6  # Hotkey ID for Alt+K set API key
+ALT_L_HOTKEY_ID = 7  # Hotkey ID for Alt+L set language
 # Window positioning flags for no-activate topmost overlay
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -397,6 +401,8 @@ class TranslatorApp(QMainWindow):
             "Transgemi\n\n"
             "Press '~' to translate the selected area.\n"
             "Press 'Alt+Q' to select an area to translate.\n"
+            "Press 'Alt+K' to set your Gemini API key.\n"
+            "Press 'Alt+L' to set the target language.\n"
             "Press '+' or '-' to change font size.\n"
             "Press 'Esc' to close."
         )
@@ -427,6 +433,16 @@ class TranslatorApp(QMainWindow):
         self.tilde_hotkey_id = TILDE_HOTKEY_ID
         if not user32.RegisterHotKey(hwnd, self.tilde_hotkey_id, 0 | MOD_NOREPEAT, VK_OEM_3):
             logging.error("Failed to register global hotkey '~'")
+
+        # Register global hotkey Alt+K for setting API Key
+        self.alt_k_hotkey_id = ALT_K_HOTKEY_ID
+        if not user32.RegisterHotKey(hwnd, self.alt_k_hotkey_id, MOD_ALT | MOD_NOREPEAT, VK_K):
+            logging.error("Failed to register global hotkey Alt+K")
+
+        # Register global hotkey Alt+L for setting language
+        self.alt_l_hotkey_id = ALT_L_HOTKEY_ID
+        if not user32.RegisterHotKey(hwnd, self.alt_l_hotkey_id, MOD_ALT | MOD_NOREPEAT, VK_L):
+            logging.error("Failed to register global hotkey Alt+L")
 
         # NEW: Persistent background worker thread for translations
         self.worker_thread = QThread(self)
@@ -531,6 +547,45 @@ class TranslatorApp(QMainWindow):
     def mouseReleaseEvent(self, event):
         # End window drag
         self.drag_offset = None
+
+    def set_api_key(self):
+        global API_KEY
+        # Hide the main window to ensure the dialog is focused
+        self.hide()
+        # Create a dummy root Tk window and withdraw it
+        root = tk.Tk()
+        root.withdraw()
+        new_key = simpledialog.askstring("API Key", "Enter your Google Gemini API Key:", show='*')
+        root.destroy()
+        # Show the main window again
+        self.show()
+
+        if new_key:
+            API_KEY = new_key.strip()
+            logging.info("API Key updated.")
+            self.append_status("API Key updated successfully.")
+        else:
+            logging.warning("API Key update cancelled.")
+            self.append_status("API Key update cancelled.")
+
+    def set_target_language(self):
+        # Hide the main window to ensure the dialog is focused
+        self.hide()
+        # Create a dummy root Tk window and withdraw it
+        root = tk.Tk()
+        root.withdraw()
+        new_lang = simpledialog.askstring("Target Language", "Enter target language code (e.g., 'en', 'ar', 'es'):", initialvalue=self.target_lang)
+        root.destroy()
+        # Show the main window again
+        self.show()
+
+        if new_lang:
+            self.target_lang = new_lang.strip().lower()
+            logging.info(f"Target language set to: {self.target_lang}")
+            self.append_status(f"Target language changed to: {self.target_lang.upper()}")
+        else:
+            logging.warning("Target language update cancelled.")
+            self.append_status("Language update cancelled.")
 
     def select_area(self):
         # Prevent opening multiple selection windows
@@ -684,6 +739,8 @@ class TranslatorApp(QMainWindow):
             user32.UnregisterHotKey(self.hwnd, self.alt_t_hotkey_id)
             user32.UnregisterHotKey(self.hwnd, self.alt_q_hotkey_id)
             user32.UnregisterHotKey(self.hwnd, self.tilde_hotkey_id)
+            user32.UnregisterHotKey(self.hwnd, self.alt_k_hotkey_id)
+            user32.UnregisterHotKey(self.hwnd, self.alt_l_hotkey_id)
         except Exception:
             pass
 
@@ -783,6 +840,14 @@ class TranslatorApp(QMainWindow):
                 elif hotkey_id == self.tilde_hotkey_id:
                     # Toggle live translation
                     self.toggle_live_translation()
+                    return True, 0
+                elif hotkey_id == self.alt_k_hotkey_id:
+                    # Set API Key
+                    self.set_api_key()
+                    return True, 0
+                elif hotkey_id == self.alt_l_hotkey_id:
+                    # Set Target Language
+                    self.set_target_language()
                     return True, 0
         return super().nativeEvent(eventType, message)
 
