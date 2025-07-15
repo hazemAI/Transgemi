@@ -25,4 +25,7 @@ There are two ways to run the application:
 -   **`Esc`**: Close the application.
 
 ## How It Works
-The tool captures the selected screen region, sends it to the Gemini AI for translation, and displays the result in a transparent, always-on-top window. It rotates through different Gemini models to manage API rate limits and caches results to improve performance. 
+The tool captures the selected screen region, sends it to the Gemini AI for translation, and displays the result in a transparent, always-on-top window. It rotates through different Gemini models to manage API rate limits and caches results to improve performance.
+
+## Inspiration
+This project was inspired by the excellent [Translumo](https://github.com/Danily07/Translumo) project. 
