@@ -3,8 +3,8 @@ import requests
 import pyautogui
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QThread, QObject, pyqtSlot, QMetaObject
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut, QLabel
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QThread, QObject, pyqtSlot, QMetaObject, QTimer
 from PyQt5.QtGui import QTextCursor, QKeySequence
 import sys
 import tkinter as tk
@@ -396,6 +396,12 @@ class TranslatorApp(QMainWindow):
         self.monitor_thread = None
         self.worker_thread = None
         self.worker = None
+        
+        # --- NEW: Dedicated status bar ---
+        self.status_label = None
+        self.status_timer = QTimer(self)
+        self.status_timer.setSingleShot(True)
+        self.status_timer.timeout.connect(self.clear_status)
 
         self.placeholder_text = (
             "Transgemi\n\n"
@@ -458,6 +464,7 @@ class TranslatorApp(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0) # No space between widgets
 
         self.text_edit = DraggableTextEdit(self)
         self.text_edit.setReadOnly(True)
@@ -466,7 +473,7 @@ class TranslatorApp(QMainWindow):
         # Hide scrollbars
         self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        main_layout.addWidget(self.text_edit)
+        main_layout.addWidget(self.text_edit, 1) # Give it stretch factor of 1
 
         # Status indicator for live translation (red=off, green=on)
         self.status_indicator = QWidget(self.text_edit)
@@ -477,6 +484,22 @@ class TranslatorApp(QMainWindow):
         self.status_indicator.show()
 
         self.sizegrip = QSizeGrip(self.text_edit)
+        
+        # Dedicated status label
+        self.status_label = QLabel(self)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("""
+            QLabel {
+                background-color: black;
+                color: #ADD8E6;
+                font-style: italic;
+                padding: 4px;
+                font-size: 9pt;
+            }
+        """)
+        self.status_label.setWordWrap(True)
+        main_layout.addWidget(self.status_label)
+        self.status_label.hide() # Hidden by default
 
     def update_font_size(self):
         font_size = self.font_sizes[self.font_size_index]
@@ -698,6 +721,7 @@ class TranslatorApp(QMainWindow):
         self.text_edit.clear()
         self.text_edit.setText(self.placeholder_text)
         self.text_edit.setAlignment(Qt.AlignCenter)
+        self.clear_status() # Also clear status bar
 
     def increase_font(self):
         self.intro_mode = False
@@ -764,7 +788,6 @@ class TranslatorApp(QMainWindow):
             if not self.selected_region:
                 logging.warning("Cannot start live translation: No region selected.")
                 self.live_translation = False  # Revert state
-                self.show_placeholder()  # Show main text
                 self.append_status("Cannot start: Select a region with Alt+Q first.")
                 return
 
@@ -794,22 +817,15 @@ class TranslatorApp(QMainWindow):
         self.status_indicator.setStyleSheet(
             f"background-color: {color}; border-radius: {radius}px;")
 
+    def clear_status(self):
+        self.status_label.setText("")
+        self.status_label.hide()
+        
     def append_status(self, text):
-        # Append a status message at the bottom in italic light-blue, always RTL
-        self.text_edit.setLayoutDirection(Qt.RightToLeft)
-        self.text_edit.setAlignment(Qt.AlignRight)
-        # spacing
-        self.text_edit.append("")
-        html = (
-            '<p dir="rtl" style="font-style:italic; font-size:small; '
-            'margin:5px; color:#ADD8E6; text-align: right;">'
-            f'{text}'
-            '</p>'
-        )
-        self.text_edit.insertHtml(html)
-        # Scroll to bottom
-        self.text_edit.verticalScrollBar().setValue(
-            self.text_edit.verticalScrollBar().maximum())
+        # Shows a message in the dedicated status bar and clears it after a delay
+        self.status_label.setText(text)
+        self.status_label.show()
+        self.status_timer.start(5000) # Clears after 5 seconds
 
     def perform_live_translation(self):
         """Slot for the monitor thread. Triggers a translation."""
