@@ -811,6 +811,7 @@ class TranslatorApp(QMainWindow):
                 self.monitor_thread.stop()
                 self.monitor_thread.wait()
                 self.monitor_thread = None
+            self.append_status("Live Translation Stopped")
 
         color = "#0f0" if self.live_translation else "#f00"
         radius = self.status_indicator.width() // 2
