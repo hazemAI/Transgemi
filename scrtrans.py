@@ -560,6 +560,7 @@ class TranslatorApp(QMainWindow):
         # Show the main window again
         self.show()
 
+        self.show_placeholder()  # Reset UI
         if new_key:
             API_KEY = new_key.strip()
             logging.info("API Key updated.")
@@ -579,6 +580,7 @@ class TranslatorApp(QMainWindow):
         # Show the main window again
         self.show()
 
+        self.show_placeholder()  # Reset UI
         if new_lang:
             self.target_lang = new_lang.strip().lower()
             logging.info(f"Target language set to: {self.target_lang}")
@@ -762,6 +764,8 @@ class TranslatorApp(QMainWindow):
             if not self.selected_region:
                 logging.warning("Cannot start live translation: No region selected.")
                 self.live_translation = False  # Revert state
+                self.show_placeholder()  # Show main text
+                self.append_status("Cannot start: Select a region with Alt+Q first.")
                 return
 
             self.text_edit.clear()
