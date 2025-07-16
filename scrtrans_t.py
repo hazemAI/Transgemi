@@ -27,6 +27,8 @@ import threading
 import collections
 import imagehash
 from winocr import recognize_cv2_sync
+import concurrent.futures
+
 user32 = ctypes.windll.user32
 WM_HOTKEY = 0x0312
 MOD_NOREPEAT = 0x4000
@@ -183,26 +185,12 @@ def capture_screen_region(region):
 #     return translation
 
 
+# Revert gemini_translate_image_request to be sequential again
 def gemini_translate_image_request(image_path, from_lang, to_lang, history=None):
     """
     Translate the screenshot image directly via Gemini.
-    Caching is now handled by the upstream TranslationWorker.
+    Iterates through models sequentially. Concurrency is handled by the worker.
     """
-    # 1. Caching is now handled by the worker, so this part is removed.
-    # try:
-    #     with open(image_path, 'rb') as f:
-    #         image_bytes = f.read()
-    #         image_hash = hashlib.sha256(image_bytes).hexdigest()
-    # except IOError as e:
-    #     logging.error(f"Could not read image file for hashing: {e}")
-    #     return "Error: Cannot read image file"
-
-    # if image_hash in TRANSLATION_CACHE:
-    #     logging.info(f"Cache hit for image hash {image_hash[:10]}...")
-    #     # Move to end to signify it was recently used
-    #     TRANSLATION_CACHE.move_to_end(image_hash)
-    #     return TRANSLATION_CACHE[image_hash]
-
     try:
         img = Image.open(image_path)
     except Exception as e:
@@ -212,9 +200,11 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
     prompt_header = (
         "SYSTEM:\n"
         "You are a high-accuracy multilingual translator. An IMAGE containing some text will be provided. "
-        f"Translate EVERY piece of text you can read from **any language** into {to_lang.upper()} ONLY."
+        f"Translate EVERY piece of text you can read from **any language** into {to_lang.upper()} ONLY. "
+        f"Even if text appears to be in English, translate it fully to {to_lang.upper()}, including titles, journey names, nicknames, or quoted phrases. "
+        "Only leave unchanged if it is an untranslatable proper noun like a real-world brand name; otherwise, provide a natural translation. "
+        "Specifically, translate the content inside any quotes or subtitles, as leaving English unchanged provides no value if it is already visible."
     )
-
     context_prompt = ""
     if history:
         context_lines = [
@@ -222,7 +212,6 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
         ]
         context_lines.extend(f"- {item}" for item in history)
         context_prompt = "\n".join(context_lines)
-
     prompt_footer = (
         "\n\nGuidelines:\n"
         "1. If some text is ALREADY in the target language, keep it as is.\n"
@@ -231,88 +220,43 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
         "4. DO NOT return English words unless they are part of proper names and must remain unchanged.\n"
         "5. Never output phrases like 'No text in the image' nor any apology."
     )
-
     prompt = prompt_header + context_prompt + prompt_footer
-    # Pre-build unblock-all safety settings list once
     _SAFETY_OFF = [
-        types.SafetySetting(
-            category=cat, threshold=types.HarmBlockThreshold.BLOCK_NONE)
-        for cat in (
-            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
-        )
+        types.SafetySetting(category=cat, threshold=types.HarmBlockThreshold.BLOCK_NONE)
+        for cat in (types.HarmCategory.HARM_CATEGORY_HARASSMENT, types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY)
     ]
-
     client = genai.Client(api_key=API_KEY)
-
-    # 2. Rate-limit-aware model rotation
     for model_name in _MODELS:
-        # Check if model is on cooldown
         if model_name in MODEL_COOLDOWNS and time.time() < MODEL_COOLDOWNS[model_name]:
             logging.info(f"Model {model_name} is on cooldown. Skipping.")
             continue
-
         logging.info(f"Attempting translation with model: {model_name}")
-
-        # Build low-latency config from scrtrans_bb.py
-        cfg_kwargs = {
-            "max_output_tokens": 96,  # subtitles rarely exceed 3 lines
-            "temperature": 0.0,       # deterministic output
-        }
-        if "2.5" in model_name:
-            # Zero thinking budget for 2.5 models to avoid extra delay
-            cfg_kwargs["thinking_config"] = types.ThinkingConfig(
-                thinking_budget=0)
-        
-        # Always define gen_config before the try block
-        gen_config = types.GenerateContentConfig(
-            **cfg_kwargs,
-            safety_settings=_SAFETY_OFF
-        )
-
         try:
+            cfg_kwargs = {"max_output_tokens": 96, "temperature": 0.0}
+            if "2.5" in model_name:
+                cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            gen_config = types.GenerateContentConfig(**cfg_kwargs, safety_settings=_SAFETY_OFF)
             contents = [prompt, img]
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=gen_config
-            )
+            response = client.models.generate_content(model=model_name, contents=contents, config=gen_config)
             result = (response.text or "").strip()
-
-            # Handle empty or no-text results
             if not result or result in ("No text in the image", "No text in the image."):
-                logging.info(
-                    f"Model {model_name} found no text or returned empty. Trying next model.")
+                logging.info(f"Model {model_name} found no text or returned empty. Trying next model.")
                 continue
-
-            # If model returns English, treat as failure for this model and try next
             if re.fullmatch(r'^[A-Za-z0-9\s\.,!\?\:;\'"()\-]+$', result):
-                logging.info(
-                    f"English-only output from {model_name}; trying next model.")
+                logging.info(f"English-only output from {model_name}; trying next model.")
                 continue
-
-            # Success!
             logging.info(f"Successful translation from {model_name}.")
-            if result: # Success!
+            if result:
                 return result
-
         except Exception as e:
             error_str = str(e).lower()
             if "rate limit" in error_str or "429" in error_str:
-                logging.warning(
-                    f"Rate limit hit for model {model_name}. Placing on cooldown for {COOLDOWN_SECONDS}s.")
+                logging.warning(f"Rate limit hit for model {model_name}. Placing on cooldown for {COOLDOWN_SECONDS}s.")
                 MODEL_COOLDOWNS[model_name] = time.time() + COOLDOWN_SECONDS
             else:
-                logging.error(
-                    f"Translation failed with model {model_name}: {e}")
-            continue  # Try next model
-
-    # If the loop completes, all models failed or are on cooldown.
-    logging.error(
-        "All models failed or are on cooldown. No translation available.")
+                logging.error(f"Translation failed with model {model_name}: {e}")
+            continue
+    logging.error("All models failed or are on cooldown. No translation available.")
     return "Translation failed: All models unavailable"
 
 
@@ -387,6 +331,7 @@ class TranslatorApp(QMainWindow):
         self.stable_required = 2  # number of stable frames before translation
         self.has_translated = False
         self.last_translation_result = None
+        self.last_update_timestamp = 0.0 # For handling out-of-order responses
 
         # Translation context: last 3 translations and hash of last processed image
         self.translation_history = collections.deque(maxlen=3)
@@ -396,7 +341,7 @@ class TranslatorApp(QMainWindow):
         self.monitor_thread = None
         self.worker_thread = None
         self.worker = None
-        
+
         # --- NEW: Dedicated status bar ---
         self.status_label = None
         self.status_timer = QTimer(self)
@@ -484,7 +429,7 @@ class TranslatorApp(QMainWindow):
         self.status_indicator.show()
 
         self.sizegrip = QSizeGrip(self.text_edit)
-        
+
         # Dedicated status label
         self.status_label = QLabel(self)
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -634,16 +579,14 @@ class TranslatorApp(QMainWindow):
 
     def start_translation(self):
         self.intro_mode = False
-        if self.translation_in_progress:
-            logging.warning("Translation already in progress.")
-            return
+        # No more translation_in_progress lock
 
         if not self.selected_region:
             self.text_edit.setAlignment(Qt.AlignCenter)
             self.text_edit.setText("Please select an area first.")
             return
 
-        self.translation_in_progress = True
+        # self.translation_in_progress = True # REMOVED
 
         if self.text_edit.toPlainText() in (self.placeholder_text, "Please select an area first."):
             self.text_edit.clear()
@@ -656,12 +599,12 @@ class TranslatorApp(QMainWindow):
             list(self.translation_history),
             self.last_processed_hash)
 
-    def on_translation_finished(self, result, processed_hash):
-        # Early return when worker signals "no change" (hash unchanged)
-        if processed_hash is None:
-            self.translation_in_progress = False
+    def on_translation_finished(self, result, processed_hash, timestamp):
+        if timestamp < self.last_update_timestamp:
+            logging.info("Skipping stale translation.")
             return
 
+        self.last_update_timestamp = timestamp
         # Store hash for next comparison
         self.last_processed_hash = processed_hash
 
@@ -671,7 +614,7 @@ class TranslatorApp(QMainWindow):
         normalized = result.strip()
         if not normalized or normalized in no_text_english or normalized in no_text_arabic:
             logging.info("No significant text found, skipping UI update.")
-            self.translation_in_progress = False
+            # self.translation_in_progress = False # REMOVED
             return
 
         # Prevent updating UI if the new translation is too similar to the last one
@@ -681,7 +624,7 @@ class TranslatorApp(QMainWindow):
             if similarity >= 0.85 and len(normalized) <= len(self.last_translation_result):
                 logging.info(
                     f"Skipping update – similarity {similarity:.2f} and no additional content.")
-                self.translation_in_progress = False
+                # self.translation_in_progress = False # REMOVED
                 return
 
         # Maintain history window
@@ -713,15 +656,14 @@ class TranslatorApp(QMainWindow):
 
         self.text_edit.verticalScrollBar().setValue(
             self.text_edit.verticalScrollBar().maximum())
-        self.translation_in_progress = False
-        # Force the UI to process all pending events, including redraws
+        # self.translation_in_progress = False # REMOVED
         QApplication.processEvents()
 
     def show_placeholder(self):
         self.text_edit.clear()
         self.text_edit.setText(self.placeholder_text)
         self.text_edit.setAlignment(Qt.AlignCenter)
-        self.clear_status() # Also clear status bar
+        self.clear_status()
 
     def increase_font(self):
         self.intro_mode = False
@@ -779,6 +721,9 @@ class TranslatorApp(QMainWindow):
             self.worker_thread.quit()
             self.worker_thread.wait()
 
+        if self.worker:
+            self.worker.shutdown() # Gracefully shutdown the executor
+
         QApplication.quit()
         event.accept()
 
@@ -795,12 +740,10 @@ class TranslatorApp(QMainWindow):
             self.append_status("Live Translation Started")
             # Immediate first translation
             self.perform_live_translation()
-            # Start the WinOCR-based monitor thread
+            # Start the WinOCR-based monitor thread using its default tuned parameters
             self.monitor_thread = WinOCRMonitorThread(
                 self.selected_region,
-                lang=self.source_lang,
-                interval=0.2,
-                sim_thresh=0.84
+                lang=self.source_lang
             )
             self.monitor_thread.change_detected.connect(self.perform_live_translation)
             self.monitor_thread.start()
@@ -830,7 +773,7 @@ class TranslatorApp(QMainWindow):
 
     def perform_live_translation(self):
         """Slot for the monitor thread. Triggers a translation."""
-        if not self.live_translation or self.translation_in_progress or not self.selected_region:
+        if not self.live_translation or not self.selected_region:
             return
         now = time.time()
         if self.last_translation_time and (now - self.last_translation_time) < self.translation_cooldown:
@@ -874,59 +817,58 @@ class TranslatorApp(QMainWindow):
 
 
 class TranslationWorker(QObject):
-    """Long-lived worker object living in its own QThread."""
+    finished = pyqtSignal(str, object, float)  # result, processed_hash, timestamp
 
-    finished = pyqtSignal(str, object)  # result, processed_hash
+    def __init__(self):
+        super().__init__()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5, thread_name_prefix='Translator')
 
-    @pyqtSlot(tuple, str, str, list, object)
-    def translate(self, region, source_lang, target_lang, history, last_hash):
-        """Heavy OCR + Gemini call executed off the GUI thread."""
+    def _execute_and_emit(self, region, source_lang, target_lang, history, last_hash, timestamp):
         screenshot_np = capture_screen_region(region)
         if screenshot_np is None:
-            # Signal no change so GUI can reset state
-            self.finished.emit("", None)
+            self.finished.emit("", None, timestamp)
             return
 
-        # Compute perceptual hash for change detection / cache key
         try:
             img_for_hash = Image.fromarray(screenshot_np)
             current_hash = imagehash.phash(img_for_hash)
-
             if current_hash == last_hash:
-                # Unchanged frame – emit special no-change signal
-                self.finished.emit("", None)
+                self.finished.emit("", None, timestamp)
                 return
-
-            # Cache lookup
             if current_hash in TRANSLATION_CACHE:
-                self.finished.emit(TRANSLATION_CACHE[current_hash], current_hash)
+                self.finished.emit(TRANSLATION_CACHE[current_hash], current_hash, timestamp)
                 return
         except Exception as e:
             logging.error(f"Failed to hash image: {e}")
             current_hash = None
 
-        # Save screenshot to temp file for Gemini request
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             temp_path = tmp.name
             (img_for_hash if 'img_for_hash' in locals() else Image.fromarray(screenshot_np)).save(temp_path)
-
-        result = gemini_translate_image_request(
-            temp_path, source_lang, target_lang, history)
-
+        
+        result = gemini_translate_image_request(temp_path, source_lang, target_lang, history)
+        
         try:
             os.remove(temp_path)
         except Exception:
             pass
 
-        # Cache new result
         if current_hash:
             TRANSLATION_CACHE[current_hash] = result
             if len(TRANSLATION_CACHE) > MAX_CACHE_SIZE:
                 TRANSLATION_CACHE.popitem(last=False)
-
-        self.finished.emit(result, current_hash)
-
+        
+        self.finished.emit(result, current_hash, timestamp)
         logging.info("Translation result: " + result.replace("\n", " | ")[:200])
+
+    @pyqtSlot(tuple, str, str, list, object)
+    def translate(self, region, source_lang, target_lang, history, last_hash):
+        """Submits a new translation job to the thread pool."""
+        timestamp = time.time()
+        self.executor.submit(self._execute_and_emit, region, source_lang, target_lang, history, last_hash, timestamp)
+
+    def shutdown(self):
+        self.executor.shutdown(wait=True)
 
 
 class WinOCRMonitorThread(QThread):
@@ -936,29 +878,36 @@ class WinOCRMonitorThread(QThread):
 
     change_detected = pyqtSignal()
 
-    def __init__(self, region, lang='en', interval=0.2, sim_thresh=0.95):
+    def __init__(self, region, lang='en', interval=0.15, sim_thresh=0.85):  # Tuned for subtitles
         super().__init__()
         self.region = region
         self.lang = lang
         self.interval = interval
         self.sim_thresh = sim_thresh
-        logging.info(f"WinOCRMonitorThread initialized with sim_thresh={self.sim_thresh}")
+        logging.info(f"WinOCRMonitorThread initialized with lang={self.lang}, interval={self.interval}, sim_thresh={self.sim_thresh}")
 
         self._running = True
         self._prev_text = None
+        self._prev_prev_text = None
+        self._prev_prev_prev_text = None
         self._last_emitted_text = None
+        self._recent_appearance = False
+        self._last_change_time = time.time()
+        self._last_emit_time = 0.0  # For debounce
 
     def stop(self):
         self._running = False
 
     def run(self):
         while self._running:
-            loop_start = time.time()
+            t0 = time.time()  # Start of loop timing
 
             frame = capture_screen_region(self.region)
             if frame is None:
                 time.sleep(self.interval)
                 continue
+            
+            t1 = time.time()  # After capture
 
             try:
                 ocr_result = recognize_cv2_sync(frame, self.lang)
@@ -968,22 +917,74 @@ class WinOCRMonitorThread(QThread):
                 logging.error(f"WinOCR failed: {e}")
                 time.sleep(self.interval)
                 continue
+            
+            t2 = time.time()  # After OCR
 
             if not curr_text:
+                if self._prev_text:  # Detect disappearance
+                    self._recent_appearance = False
+                self._prev_prev_prev_text = self._prev_prev_text
+                self._prev_prev_text = self._prev_text
                 self._prev_text = curr_text
                 time.sleep(self.interval)
                 continue
 
+            emit = False
             if self._prev_text is not None:
                 sim = SequenceMatcher(None, curr_text, self._prev_text).ratio()
-                if sim >= self.sim_thresh and curr_text != self._last_emitted_text:
-                    self._last_emitted_text = curr_text
-                    self.change_detected.emit()
+                sim_prev = 0.0
+                if self._prev_prev_text is not None:
+                    sim_prev = SequenceMatcher(None, self._prev_text, self._prev_prev_text).ratio()
+                sim_prev_prev = 0.0
+                if self._prev_prev_prev_text is not None:
+                    sim_prev_prev = SequenceMatcher(None, self._prev_prev_text, self._prev_prev_prev_text).ratio()
 
+                if not self._prev_text and curr_text:
+                    self._recent_appearance = True
+                    self._last_change_time = time.time()
+
+                is_duplicate = False
+                if self._last_emitted_text:
+                    dup_ratio = SequenceMatcher(None, curr_text, self._last_emitted_text).ratio()
+                    if dup_ratio >= 0.95:
+                        is_duplicate = True
+                
+                t3 = time.time()
+
+                time_since_change = time.time() - self._last_change_time
+                timing_log = f"Timings(ms): Capture={int((t1-t0)*1000)}, OCR={int((t2-t1)*1000)}, Logic={int((t3-t2)*1000)}. Since change: {time_since_change:.2f}s"
+
+                if is_duplicate:
+                    logging.info(f"Skipping near-duplicate (ratio {dup_ratio:.2f}). {timing_log}")
+                else:
+                    if self._recent_appearance:
+                        if sim >= self.sim_thresh and sim_prev >= self.sim_thresh:
+                            emit = True
+                            logging.info(f"Quick two-check emission. {timing_log}")
+                            self._recent_appearance = False
+                    else:
+                        if sim >= self.sim_thresh and sim_prev >= self.sim_thresh and sim_prev_prev >= self.sim_thresh:
+                            emit = True
+                            logging.info(f"Full stability emission. {timing_log}")
+
+                if not emit and not is_duplicate:
+                    logging.info(f"Chain below threshold. {timing_log}")
+
+            if emit:
+                now = time.time()
+                if now - self._last_emit_time < 0.2:
+                    logging.info(f"Debounce: Too soon after last emit; skipping.")
+                else:
+                    self.change_detected.emit()
+                    self._last_emitted_text = curr_text
+                    self._last_emit_time = now
+                    self._last_change_time = now
+
+            self._prev_prev_prev_text = self._prev_prev_text
+            self._prev_prev_text = self._prev_text
             self._prev_text = curr_text
 
-            # pacing
-            elapsed = time.time() - loop_start
+            elapsed = time.time() - t0
             sleep_time = self.interval - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
