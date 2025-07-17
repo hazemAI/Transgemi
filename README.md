@@ -31,6 +31,9 @@ This application requires a Google Gemini API key to function. You can generate 
 
 Use the `Alt + K` hotkey to enter your key into the application.
 
+## Usage Tips
+- **If the translation feels stuck or unresponsive,** simply press `Alt + Q` to re-select the capture area. This often resets the process.
+
 ## How It Works
 The tool captures the selected screen region, sends it to the Gemini AI for translation, and displays the result in a transparent, always-on-top window. It rotates through different Gemini models to manage API rate limits and caches results to improve performance.
 
