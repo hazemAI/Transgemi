@@ -214,7 +214,7 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
     prompt_footer = (
         "\n\nGuidelines:\n"
         "1. If some text is ALREADY in the target language, keep it as is.\n"
-        "2. If the image has NO readable text, output an EMPTY string.\n"
+        "2. If the image has NO readable text, you MUST output the exact token `__NO_TEXT__` and nothing else.\n"
         "3. Output **pure translated text** – no comments, no language tags, no explanations.\n"
         "4. DO NOT return English words unless they are part of proper names and must remain unchanged.\n"
         "5. Never output phrases like 'No text in the image' nor any apology."
@@ -609,8 +609,9 @@ class TranslatorApp(QMainWindow):
 
         # Log and skip UI update when no text in the image
         normalized = result.strip()
-        if not normalized:
+        if not normalized or normalized == "__NO_TEXT__":
             logging.info("No significant text found, skipping UI update.")
+            # self.translation_in_progress = False # REMOVED
             return
 
         # Prevent updating UI if the new translation is too similar to the last one
