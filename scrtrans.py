@@ -91,7 +91,6 @@ _MODELS = [
     "gemini-2.0-flash",
     "gemini-2.5-flash-lite-preview-06-17",
     "gemini-2.5-flash",
-    "gemini-2.5-flash-preview-04-17",
     "gemini-1.5-flash-8b",
     "learnlm-2.0-flash-experimental",
 ]
@@ -609,12 +608,9 @@ class TranslatorApp(QMainWindow):
         self.last_processed_hash = processed_hash
 
         # Log and skip UI update when no text in the image
-        no_text_english = ("No text in the image", "No text in the image.")
-        no_text_arabic = ("لا يوجد نص في الصورة", "لا يوجد نص في الصورة.")
         normalized = result.strip()
-        if not normalized or normalized in no_text_english or normalized in no_text_arabic:
+        if not normalized:
             logging.info("No significant text found, skipping UI update.")
-            # self.translation_in_progress = False # REMOVED
             return
 
         # Prevent updating UI if the new translation is too similar to the last one
