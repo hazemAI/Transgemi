@@ -1,0 +1,18 @@
+﻿# Ignore Python bytecode and caches
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.env
+
+# Logs and temp files
+*.log
+*.tmp
+
+# IDE settings
+.vscode/
+.idea/
+
+run_transgemi.vbs
+

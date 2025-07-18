@@ -2,6 +2,13 @@
 
 A simple, on-the-fly screen translator that uses Windows' built-in OCR and Google's Gemini AI to translate text from a selected area of your screen.
 
+## Installation
+
+1.  Go to the [**Releases**](https://github.com/404invalid-user/Transgemi/releases) page.
+2.  Download the latest `Transgemi.zip` file.
+3.  Unzip the file.
+4.  Run `Transgemi.exe` from the extracted folder.
+
 ## How to Use
 
 ### Prerequisites
@@ -13,9 +20,6 @@ There are two ways to run the application:
 
 1.  **Directly with Python (Recommended for developers):**
     `python scrtrans.py`
-
-2.  **Using the VBScript (For ease of use):**
-    Double-click the `run_transgemi.vbs` file. This script runs the Python application in the background without opening a console window.
 
 ### Hotkeys
 -   **`Alt + Q`**: Select a new area on the screen to translate.
