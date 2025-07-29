@@ -89,7 +89,7 @@ COOLDOWN_SECONDS = 60
 _MODELS = [
     "gemini-2.0-flash-lite",
     "gemini-2.0-flash",
-    "gemini-2.5-flash-lite-preview-06-17",
+    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-1.5-flash-8b",
     "learnlm-2.0-flash-experimental",
