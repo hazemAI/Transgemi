@@ -2,7 +2,7 @@
 
 ## Demo
 
-![Demo](./demo.mp4)
+<video src="https://github.com/user-attachments/assets/90de884e-d1c1-4feb-a3d0-0878dfe68bf9" controls="controls" style="max-width: 720px;"></video>
 
 A simple, on-the-fly screen translator that uses Windows' built-in OCR and Google's Gemini AI to translate text from a selected area of your screen.
 
