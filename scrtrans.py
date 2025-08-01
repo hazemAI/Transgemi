@@ -178,7 +178,6 @@ def capture_screen_region(region):
 #     return translation
 
 
-# Revert gemini_translate_image_request to be sequential again
 def gemini_translate_image_request(image_path, from_lang, to_lang, history=None):
     """
     Translate the screenshot image directly via Gemini.
@@ -353,13 +352,13 @@ class TranslatorApp(QMainWindow):
 
         self.placeholder_text = (
             "Transgemi\n\n"
-            "Press '~' to translate the selected area.\n"
-            "Press 'Alt+Q' to select an area to translate.\n"
-            "Press 'Alt+K' to set your Gemini API key.\n"
-            "Press 'Alt+L' to set languages (src > tgt).\n"
-            "Press '+' or '-' to change font size.\n"
-            "(Note: Source OCR currently supports Latin-script languages only.)\n"
-            "Press 'Esc' to close."
+            "Press 'Alt+Q' to select an area to translate\n\n"
+            "Press '~' to translate the selected area\n\n"
+            "Press 'Alt+K' to set your Gemini API key\n\n"
+            "Press 'Alt+L' to set languages (src > tgt)\n\n"
+            "Press '+' or '-' to change font size\n\n"
+            "Press 'Alt+T' to show or hide the translation window\n\n"
+            "Press 'Esc' to close"
         )
 
         self.init_ui()
@@ -548,7 +547,7 @@ class TranslatorApp(QMainWindow):
         self.hide()
         root = tk.Tk(); root.withdraw()
         default_value = f"{self.source_lang or 'auto'} > {self.target_lang}"
-        prompt = "Enter languages in the form 'source > target':"
+        prompt = "Enter languages in the form 'source > target': \n(Note: Source OCR currently supports Latin-script languages only.)"
         input_str = simpledialog.askstring("Languages", prompt, initialvalue=default_value)
         root.destroy(); self.show()
 

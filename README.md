@@ -25,7 +25,7 @@ There are two ways to run the application:
 -   **`Alt + Q`**: Select a new area on the screen to translate.
 -   **`~`** (Tilde key): Toggle live translation on or off for the selected area.
 -   **`Alt + K`**: Set your Google Gemini API Key. A dialog will appear to paste your key.
--   **`Alt + L`**: Set the target language for translation (e.g., 'en' for English, 'es' for Spanish).
+-   **`Alt + L`**: Set source or target language for translation.
 -   **`+` / `-`**: Increase or decrease the font size of the translated text.
 -   **`Alt + T`**: Show or hide the translation window.
 -   **`Esc`**: Close the application.
