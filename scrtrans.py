@@ -1,18 +1,14 @@
-from PIL import Image, ImageDraw, ImageFilter
-import requests
+from PIL import Image
 import pyautogui
-import cv2
 import numpy as np
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut, QLabel
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QThread, QObject, pyqtSlot, QMetaObject, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, pyqtSlot, QTimer
 from PyQt5.QtGui import QTextCursor, QKeySequence
 import sys
 import tkinter as tk
 from tkinter import simpledialog, Canvas
 import logging
 import time
-import random
-import asyncio
 from google import genai
 from google.genai import types
 import ctypes
@@ -20,10 +16,8 @@ from ctypes import wintypes
 import tempfile
 import os
 import itertools
-import hashlib
 import re
 from difflib import SequenceMatcher
-import threading
 import collections
 import imagehash
 from winocr import recognize_cv2_sync
@@ -196,14 +190,23 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
         logging.error(f"Failed to open image for translation: {e}")
         return "Error: Cannot open image"
 
-    prompt_header = (
-        "SYSTEM:\n"
-        "You are a high-accuracy multilingual translator. An IMAGE containing some text will be provided. "
-        f"Translate EVERY piece of text you can read from **any language** into {to_lang.upper()} ONLY. "
-        f"Even if text appears to be in English, translate it fully to {to_lang.upper()}, including titles, journey names, nicknames, or quoted phrases. "
-        "Only leave unchanged if it is an untranslatable proper noun like a real-world brand name; otherwise, provide a natural translation. "
-        "Specifically, translate the content inside any quotes or subtitles, as leaving English unchanged provides no value if it is already visible."
-    )
+    # Build the header: specific source language vs auto-detect
+    if from_lang.lower() in ("", "auto", "any"):
+        prompt_header = (
+            "SYSTEM:\n"
+            "You are a high-accuracy multilingual translator. An IMAGE containing some text will be provided. "
+            f"Translate EVERY piece of text you can read into {to_lang.upper()} ONLY. "
+            f"Even if text appears to be in English, translate it fully to {to_lang.upper()}, including titles, journey names, nicknames, or quoted phrases. "
+            "Only leave unchanged if it is an untranslatable proper noun like a real-world brand name; otherwise, provide a natural translation. "
+            "Specifically, translate the content inside any quotes or subtitles, as leaving English unchanged provides no value if it is already visible."
+        )
+    else:
+        prompt_header = (
+            "SYSTEM:\n"
+            f"You are a high-accuracy translator. An IMAGE containing text written in {from_lang.upper()} will be provided. "
+            f"Translate it into {to_lang.upper()} ONLY. "
+            "Leave unchanged any untranslatable proper nouns (e.g., brand names)."
+        )
     context_prompt = ""
     if history:
         context_lines = [
@@ -241,8 +244,9 @@ def gemini_translate_image_request(image_path, from_lang, to_lang, history=None)
             if not result or result in ("No text in the image", "No text in the image."):
                 logging.info(f"Model {model_name} found no text or returned empty. Trying next model.")
                 continue
-            if re.fullmatch(r'^[A-Za-z0-9\s\.,!\?\:;\'"()\-]+$', result):
-                logging.info(f"English-only output from {model_name}; trying next model.")
+            # Skip English-only outputs only when the desired target language is NOT English
+            if to_lang.lower() not in ('english', 'en') and re.fullmatch(r'^[A-Za-z0-9\s\.,!\?\:;\'"()\-]+$', result):
+                logging.info(f"English-only output from {model_name} while target is {to_lang}; trying next model.")
                 continue
             logging.info(f"Successful translation from {model_name}.")
             if result:
@@ -308,8 +312,8 @@ class TranslatorApp(QMainWindow):
         # Live translation toggle state
         self.live_translation = False
         # Default languages for live translation
-        self.source_lang = 'en'
-        self.target_lang = 'ar'
+        self.source_lang = 'auto'
+        self.target_lang = 'english'
         # Keep reference to live thread to prevent premature destruction
         self.live_thread = None
         # Whether to show stop status after pending translation
@@ -352,8 +356,9 @@ class TranslatorApp(QMainWindow):
             "Press '~' to translate the selected area.\n"
             "Press 'Alt+Q' to select an area to translate.\n"
             "Press 'Alt+K' to set your Gemini API key.\n"
-            "Press 'Alt+L' to set the target language.\n"
+            "Press 'Alt+L' to set languages (src > tgt).\n"
             "Press '+' or '-' to change font size.\n"
+            "(Note: Source OCR currently supports Latin-script languages only.)\n"
             "Press 'Esc' to close."
         )
 
@@ -537,24 +542,33 @@ class TranslatorApp(QMainWindow):
             self.append_status("API Key update cancelled.")
 
     def set_target_language(self):
-        # Hide the main window to ensure the dialog is focused
+        """Ask the user for languages in the form 'src > tgt' (e.g., 'auto > arabic').
+        The left side may be 'auto' or blank to let Gemini auto-detect."""
+        # Temporarily hide overlay so dialog takes focus
         self.hide()
-        # Create a dummy root Tk window and withdraw it
-        root = tk.Tk()
-        root.withdraw()
-        new_lang = simpledialog.askstring("Target Language", "Enter target language code (e.g., 'en', 'ar', 'es'):", initialvalue=self.target_lang)
-        root.destroy()
-        # Show the main window again
-        self.show()
+        root = tk.Tk(); root.withdraw()
+        default_value = f"{self.source_lang or 'auto'} > {self.target_lang}"
+        prompt = "Enter languages in the form 'source > target':"
+        input_str = simpledialog.askstring("Languages", prompt, initialvalue=default_value)
+        root.destroy(); self.show()
 
-        self.show_placeholder()  # Reset UI
-        if new_lang:
-            self.target_lang = new_lang.strip().lower()
-            logging.info(f"Target language set to: {self.target_lang}")
-            self.append_status(f"Target language changed to: {self.target_lang.upper()}")
-        else:
-            logging.warning("Target language update cancelled.")
+        self.show_placeholder()
+        if not input_str:
+            logging.warning("Language update cancelled.")
             self.append_status("Language update cancelled.")
+            return
+
+        parts = [p.strip().lower() for p in re.split(r'>', input_str, maxsplit=1)]
+        if len(parts) != 2 or not parts[1]:
+            logging.warning("Invalid language format entered.")
+            self.append_status("Invalid format. Use 'src > tgt'.")
+            return
+
+        self.source_lang = parts[0] or 'auto'
+        self.target_lang = parts[1]
+        self.append_status(f"Languages set: {self.source_lang.upper()} ➜ {self.target_lang.upper()}")
+        logging.info(f"Languages updated to {self.source_lang} -> {self.target_lang}")
+
 
     def select_area(self):
         # Prevent opening multiple selection windows
@@ -740,7 +754,7 @@ class TranslatorApp(QMainWindow):
             # Start the WinOCR-based monitor thread using its default tuned parameters
             self.monitor_thread = WinOCRMonitorThread(
                 self.selected_region,
-                lang=self.source_lang
+                lang="en"
             )
             self.monitor_thread.change_detected.connect(self.perform_live_translation)
             self.monitor_thread.start()
