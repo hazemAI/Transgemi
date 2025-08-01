@@ -1,10 +1,14 @@
 # <img src="Transgemi.ico" alt="Transgemi Icon" width="48"> Transgemi - Screen Translator
 
+## Demo
+
+![Demo](./demo.mp4)
+
 A simple, on-the-fly screen translator that uses Windows' built-in OCR and Google's Gemini AI to translate text from a selected area of your screen.
 
 ## Installation
 
-1.  Go to the [**Releases**](https://github.com/404invalid-user/Transgemi/releases) page.
+1.  Go to the [**Releases**](https://github.com/hazemAI/Transgemi/releases) page.
 2.  Download the latest `Transgemi.zip` file.
 3.  Unzip the file.
 4.  Run `Transgemi.exe` from the extracted folder.
@@ -16,10 +20,8 @@ Make sure you have Python installed and the required libraries. You can install 
 `pip install -r requirements.txt`
 
 ### Running the Application
-There are two ways to run the application:
-
-1.  **Directly with Python (Recommended for developers):**
-    `python scrtrans.py`
+1.  **Launch the App by double-clicking the `Transgemi.exe` file (Recommended for normal users)**
+2.  **Directly with Python (Need prerequisites step):** `python scrtrans.py`
 
 ### Hotkeys
 -   **`Alt + Q`**: Select a new area on the screen to translate.
