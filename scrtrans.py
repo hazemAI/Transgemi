@@ -1,12 +1,10 @@
 from PIL import Image
 import pyautogui
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut, QLabel
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, pyqtSlot, QTimer
-from PyQt5.QtGui import QTextCursor, QKeySequence
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut, QLabel, QInputDialog, QLineEdit, QDialog, QRubberBand
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QRect
+from PyQt5.QtGui import QTextCursor, QKeySequence, QGuiApplication, QCursor
 import sys
-import tkinter as tk
-from tkinter import simpledialog, Canvas
 import logging
 import time
 from google import genai
@@ -15,13 +13,13 @@ import ctypes
 from ctypes import wintypes
 import tempfile
 import os
-import itertools
 import re
 from difflib import SequenceMatcher
 import collections
 import imagehash
 from winocr import recognize_cv2_sync
 import concurrent.futures
+import dotenv
 
 user32 = ctypes.windll.user32
 WM_HOTKEY = 0x0312
@@ -29,11 +27,6 @@ MOD_NOREPEAT = 0x4000
 MOD_ALT = 0x0001  # Alt key
 # Virtual Key Codes
 VK_OEM_3 = 0xC0  # ~ key
-VK_0 = 0x30
-VK_9 = 0x39
-VK_ESCAPE = 0x1B
-VK_OEM_PLUS = 0xBB
-VK_OEM_MINUS = 0xBD
 VK_T = 0x54  # 'T' key
 VK_Q = 0x51  # 'Q' key
 VK_K = 0x4B  # 'K' key
@@ -41,8 +34,6 @@ VK_L = 0x4C  # 'L' key
 ALT_T_HOTKEY_ID = 1  # Hotkey ID for Alt+T visibility toggle
 ALT_Q_HOTKEY_ID = 2  # Hotkey ID for Alt+Q select area
 TILDE_HOTKEY_ID = 3  # Hotkey ID for '~' toggle live translation
-PLUS_HOTKEY_ID = 4  # Hotkey ID for '+' increase font size
-MINUS_HOTKEY_ID = 5  # Hotkey ID for '-' decrease font size
 ALT_K_HOTKEY_ID = 6  # Hotkey ID for Alt+K set API key
 ALT_L_HOTKEY_ID = 7  # Hotkey ID for Alt+L set language
 # Window positioning flags for no-activate topmost overlay
@@ -55,30 +46,23 @@ GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
 
-# Low-level keyboard hook constants and structure
-WH_KEYBOARD_LL = 13
-WM_KEYDOWN = 0x0100
-
-
-class KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("vkCode", wintypes.DWORD),
-        ("scanCode", wintypes.DWORD),
-        ("flags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_size_t),
-    ]
-
-
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
-API_KEY = 'AIzaSyBOf37NOeSQ8tx3yKPawqjFjUbRc2_Jk8w'
+# dotenv.load_dotenv()
+API_KEY = "AIzaSyBYTMvbd7BPp-sK5XpNsn2Po2Ung8rKHX4"
 
 # Globals for caching and rate-limit cooldowns
 TRANSLATION_CACHE = collections.OrderedDict()
 MAX_CACHE_SIZE = 100
 MODEL_COOLDOWNS = {}
 COOLDOWN_SECONDS = 60
+
+# Tuning constants
+STATUS_CLEAR_MS = 5000
+EMIT_DEBOUNCE_SECONDS = 0.2
+OCR_INTERVAL_DEFAULT = 0.15
+OCR_SIM_THRESH_DEFAULT = 0.85
+DUPLICATE_RATIO = 0.95
 
 _MODELS = [
     "gemini-2.0-flash-lite",
@@ -88,64 +72,124 @@ _MODELS = [
     "gemini-1.5-flash-8b",
     "learnlm-2.0-flash-experimental",
 ]
-_model_cycle = itertools.cycle(_MODELS)
-_current_model = next(_model_cycle)
 
+class RegionSelector(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setCursor(Qt.CrossCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        # Semi-transparent dark overlay
+        # We'll paint the dim layer in paintEvent for reliability
+        # Cover the entire virtual desktop across all monitors
+        screens = QGuiApplication.screens() or [QGuiApplication.primaryScreen()]
+        left = min(s.geometry().left() for s in screens)
+        top = min(s.geometry().top() for s in screens)
+        right = max(s.geometry().right() for s in screens)
+        bottom = max(s.geometry().bottom() for s in screens)
+        self.setGeometry(QRect(left, top, right - left + 1, bottom - top + 1))
 
-def select_screen_region_with_mouse():
+        self.origin_global = None
+        self.rubber_band = QRubberBand(QRubberBand.Rectangle, self)
+        self._selected = None
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Bring to front and attempt to focus
+        self.raise_()
+        self.activateWindow()
+        self.setFocus(Qt.ActiveWindowFocusReason)
+        try:
+            user32.SetForegroundWindow(int(self.winId()))
+        except Exception:
+            pass
+        # Defer grabs until the window is visible to avoid QWindows warning
+        QTimer.singleShot(0, self._grab_inputs)
+
+    def _grab_inputs(self):
+        try:
+            if self.isVisible():
+                self.grabKeyboard()
+                self.grabMouse(Qt.CrossCursor)
+        except Exception:
+            pass
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            # Right-click cancels selection
+            self._selected = None
+            self.reject()
+            return
+        if event.button() == Qt.LeftButton:
+            self.origin_global = event.globalPos()
+            start_local = self.mapFromGlobal(self.origin_global)
+            self.rubber_band.setGeometry(QRect(start_local, start_local))
+            self.rubber_band.show()
+
+    def mouseMoveEvent(self, event):
+        if self.origin_global is not None:
+            start_local = self.mapFromGlobal(self.origin_global)
+            now_local = self.mapFromGlobal(event.globalPos())
+            self.rubber_band.setGeometry(QRect(start_local, now_local).normalized())
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.origin_global is not None:
+            rect = self.rubber_band.geometry()
+            top_left = self.mapToGlobal(rect.topLeft())
+            self._selected = (top_left.x(), top_left.y(), rect.width(), rect.height())
+            self.accept()
+
+    def keyPressEvent(self, event):
+        # Alt+X cancels the selection
+        if (event.key() == Qt.Key_X) and (event.modifiers() & Qt.AltModifier):
+            self._selected = None
+            self.reject()
+            event.accept()
+            return
+        # Esc should NOT close app while selecting; ignore it here
+        if event.key() == Qt.Key_Escape:
+            event.accept()
+            return
+        else:
+            super().keyPressEvent(event)
+
+    def get_selection(self):
+        return self._selected
+
+    def paintEvent(self, event):
+        # Paint a translucent black overlay to dim the screen
+        from PyQt5.QtGui import QPainter, QColor
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+        # Optionally draw the rubber band border more visibly
+        # RubberBand itself draws a border; no extra painting here
+        
+    def closeEvent(self, event):
+        try:
+            self.releaseKeyboard()
+            self.releaseMouse()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+def select_screen_region_with_mouse(parent=None):
     print("Please select a part of the screen using the mouse.")
-    region = {}
-
-    root = tk.Tk()
-    root.attributes("-fullscreen", True)
-    root.attributes("-alpha", 0.3)
-    root.configure(bg="black")
-    root.bind('<Escape>', lambda event: root.quit())
-    root.focus_force()
-
-    canvas = Canvas(root, cursor="cross", bg="black")
-    canvas.pack(fill="both", expand=True)
-
-    rect = None
-    start_x = 0
-    start_y = 0
-
-    def on_mouse_press(event):
-        nonlocal start_x, start_y, rect
-        start_x = event.x
-        start_y = event.y
-        region['x1'] = event.x_root
-        region['y1'] = event.y_root
-        if not rect:
-            rect = canvas.create_rectangle(0, 0, 0, 0, outline='red', width=2)
-        canvas.coords(rect, start_x, start_y, start_x, start_y)
-
-    def on_mouse_drag(event):
-        canvas.coords(rect, start_x, start_y, event.x, event.y)
-
-    def on_mouse_release(event):
-        region['x2'] = event.x_root
-        region['y2'] = event.y_root
-        root.quit()
-
-    canvas.bind("<ButtonPress-1>", on_mouse_press)
-    canvas.bind("<B1-Motion>", on_mouse_drag)
-    canvas.bind("<ButtonRelease-1>", on_mouse_release)
-
-    root.mainloop()
-    root.destroy()
-
-    if 'x1' in region and 'y1' in region and 'x2' in region and 'y2' in region:
-        x = min(region['x1'], region['x2'])
-        y = min(region['y1'], region['y2'])
-        width = abs(region['x2'] - region['x1'])
-        height = abs(region['y2'] - region['y1'])
-        print(
-            f"Selected region: (X: {x}, Y: {y}, Width: {width}, Height: {height})")
-        return (x, y, width, height)
-    else:
-        print("No region selected. Exiting.")
-        return None
+    dlg = RegionSelector(parent)
+    dlg.show()
+    dlg.raise_()
+    dlg.activateWindow()
+    QApplication.setActiveWindow(dlg)
+    if dlg.exec_() == QDialog.Accepted:
+        sel = dlg.get_selection()
+        if sel and sel[2] > 0 and sel[3] > 0:
+            x, y, w, h = sel
+            print(f"Selected region: (X: {x}, Y: {y}, Width: {w}, Height: {h})")
+            return (x, y, w, h)
+    print("Selection cancelled.")
+    return None
 
 
 def capture_screen_region(region):
@@ -161,28 +205,15 @@ def capture_screen_region(region):
         print(f"Error capturing screen region: {e}")
         return None
 
-# The TranslationWorker now handles this logic directly.
-# def process_screen_region_direct(region, source_lang, target_lang):
-#     screenshot_np = capture_screen_region(region)
-#     if screenshot_np is None:
-#         return "Failed to capture screen"
-#     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-#         temp_path = tmp.name
-#         cv2.imwrite(temp_path, screenshot_np)
-#     translation = gemini_translate_image_request(
-#         temp_path, source_lang, target_lang)
-#     try:
-#         os.remove(temp_path)
-#     except Exception:
-#         pass
-#     return translation
-
 
 def gemini_translate_image_request(image_path, from_lang, to_lang, history=None):
     """
     Translate the screenshot image directly via Gemini.
     Iterates through models sequentially. Concurrency is handled by the worker.
     """
+    if not API_KEY:
+        logging.error("Gemini API key missing. Set GEMINI_API_KEY or use Alt+K to set it at runtime.")
+        return "Error: Missing API key"
     try:
         img = Image.open(image_path)
     except Exception as e:
@@ -290,8 +321,8 @@ class TranslatorApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        # Prevent this window from taking focus so games remain focused
-        self.setFocusPolicy(Qt.NoFocus)
+        # Do not steal focus automatically, but allow focus when user clicks the overlay
+        self.setFocusPolicy(Qt.ClickFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         screen_geometry = QApplication.primaryScreen().availableGeometry()
@@ -300,38 +331,21 @@ class TranslatorApp(QMainWindow):
         self.setGeometry(screen_geometry.left(),
                          screen_geometry.bottom() - height, width, height)
 
-        self.old_pos = None
-
         self.selected_region = None
-        self.translation_in_progress = False
         self.font_sizes = [8, 9, 10, 11, 12, 13, 14,
                            15, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72]
         self.font_size_index = self.font_sizes.index(15)  # Default size 15
-        self.intro_mode = True
         # Live translation toggle state
         self.live_translation = False
         # Default languages for live translation
         self.source_lang = 'auto'
-        self.target_lang = 'english'
-        # Keep reference to live thread to prevent premature destruction
-        self.live_thread = None
-        # Whether to show stop status after pending translation
-        self.stop_pending = False
+        self.target_lang = 'arabic'
         # Flag to prevent multiple simultaneous area selections
         self.selecting = False
-        # Last white-pixel count to detect text changes via ROI masking
-        self.last_white_count = None
         # Timestamp of last translation to throttle API calls
         self.last_translation_time = 0.0
         # Cooldown period (seconds) between API calls to avoid consumption
         self.translation_cooldown = 1.0
-        # Perceptual hash state for change detection
-        self.last_image_hash = None  # store the last frame's hash
-        self.hash_threshold = 8      # hamming distance threshold to trigger a new translation
-        # Stability counter to ensure text area settles before translation
-        self.stable_count = 0
-        self.stable_required = 2  # number of stable frames before translation
-        self.has_translated = False
         self.last_translation_result = None
         self.last_update_timestamp = 0.0 # For handling out-of-order responses
 
@@ -339,12 +353,12 @@ class TranslatorApp(QMainWindow):
         self.translation_history = collections.deque(maxlen=3)
         self.last_processed_hash = None
         
-        # --- NEW: References to worker/monitor threads ---
+        # --- References to worker/monitor threads ---
         self.monitor_thread = None
         self.worker_thread = None
         self.worker = None
 
-        # --- NEW: Dedicated status bar ---
+        # --- Dedicated status bar ---
         self.status_label = None
         self.status_timer = QTimer(self)
         self.status_timer.setSingleShot(True)
@@ -352,8 +366,8 @@ class TranslatorApp(QMainWindow):
 
         self.placeholder_text = (
             "Transgemi\n\n"
-            "Press 'Alt+Q' to select an area to translate\n\n"
-            "Press '~' to translate the selected area\n\n"
+            "Press 'Alt+Q' to select an area to translate and 'Alt+X' to cancel selection\n\n"
+            "Press '~' to live translate the selected area\n\n"
             "Press 'Alt+K' to set your Gemini API key\n\n"
             "Press 'Alt+L' to set languages (src > tgt)\n\n"
             "Press '+' or '-' to change font size\n\n"
@@ -398,7 +412,7 @@ class TranslatorApp(QMainWindow):
         if not user32.RegisterHotKey(hwnd, self.alt_l_hotkey_id, MOD_ALT | MOD_NOREPEAT, VK_L):
             logging.error("Failed to register global hotkey Alt+L")
 
-        # NEW: Persistent background worker thread for translations
+        # Persistent background worker thread for translations
         self.worker_thread = QThread(self)
         self.worker = TranslationWorker()
         self.worker.moveToThread(self.worker_thread)
@@ -519,16 +533,44 @@ class TranslatorApp(QMainWindow):
         # End window drag
         self.drag_offset = None
 
+    def _get_text_dialog(self, title, label, default_text="", password=False):
+        dlg = QInputDialog(self, flags=Qt.Dialog | Qt.WindowStaysOnTopHint)
+        dlg.setModal(True)
+        dlg.setWindowModality(Qt.ApplicationModal)
+        dlg.setInputMode(QInputDialog.TextInput)
+        dlg.setLabelText(label)
+        dlg.setTextValue(default_text)
+        if password:
+            dlg.setTextEchoMode(QLineEdit.Password)
+        # Center on the screen under the mouse cursor (fallback to primary)
+        try:
+            screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+            geo = screen.availableGeometry()
+        except Exception:
+            geo = QApplication.primaryScreen().availableGeometry()
+        dlg.adjustSize()
+        rect = dlg.frameGeometry()
+        rect.moveCenter(geo.center())
+        dlg.move(rect.topLeft())
+        dlg.show()
+        QApplication.processEvents()
+        dlg.raise_()
+        dlg.activateWindow()
+        QApplication.setActiveWindow(dlg)
+        if dlg.exec_() and dlg.textValue():
+            return dlg.textValue()
+        return None
+
     def set_api_key(self):
         global API_KEY
-        # Hide the main window to ensure the dialog is focused
+        # Temporarily hide overlay so the dialog grabs focus, then restore
         self.hide()
-        # Create a dummy root Tk window and withdraw it
-        root = tk.Tk()
-        root.withdraw()
-        new_key = simpledialog.askstring("API Key", "Enter your Google Gemini API Key:", show='*')
-        root.destroy()
-        # Show the main window again
+        new_key = self._get_text_dialog(
+            "API Key",
+            "Enter your Google Gemini API Key:",
+            "",
+            password=True
+        )
         self.show()
 
         self.show_placeholder()  # Reset UI
@@ -537,7 +579,7 @@ class TranslatorApp(QMainWindow):
             logging.info("API Key updated.")
             self.append_status("API Key updated successfully.")
         else:
-            logging.warning("API Key update cancelled.")
+            logging.info("API Key update cancelled.")
             self.append_status("API Key update cancelled.")
 
     def set_target_language(self):
@@ -545,15 +587,14 @@ class TranslatorApp(QMainWindow):
         The left side may be 'auto' or blank to let Gemini auto-detect."""
         # Temporarily hide overlay so dialog takes focus
         self.hide()
-        root = tk.Tk(); root.withdraw()
         default_value = f"{self.source_lang or 'auto'} > {self.target_lang}"
         prompt = "Enter languages in the form 'source > target': \n(Note: Source OCR currently supports Latin-script languages only.)"
-        input_str = simpledialog.askstring("Languages", prompt, initialvalue=default_value)
-        root.destroy(); self.show()
+        input_str = self._get_text_dialog("Languages", prompt, default_value)
+        self.show()
 
         self.show_placeholder()
         if not input_str:
-            logging.warning("Language update cancelled.")
+            logging.info("Language update cancelled.")
             self.append_status("Language update cancelled.")
             return
 
@@ -579,26 +620,34 @@ class TranslatorApp(QMainWindow):
         if self.live_translation:
             self.toggle_live_translation()
 
-        self.intro_mode = False
-        self.selected_region = select_screen_region_with_mouse()
-        if self.selected_region:
-            print(f"Selected region: {self.selected_region}")
-            # Restart live translation after selecting new region
-            self.toggle_live_translation()
+        # Temporarily unregister tilde hotkey during selection to avoid toggling
+        try:
+            user32.UnregisterHotKey(self.hwnd, self.tilde_hotkey_id)
+        except Exception:
+            pass
 
-        # Allow new selection after completion
-        self.selecting = False
+        try:
+            self.selected_region = select_screen_region_with_mouse(self)
+            if self.selected_region:
+                print(f"Selected region: {self.selected_region}")
+                # Restart live translation after selecting new region
+                self.toggle_live_translation()
+        finally:
+            # Re-register tilde hotkey after selection
+            try:
+                user32.RegisterHotKey(self.hwnd, self.tilde_hotkey_id, 0 | MOD_NOREPEAT, VK_OEM_3)
+            except Exception:
+                pass
+            # Allow new selection after completion
+            self.selecting = False
 
     def start_translation(self):
-        self.intro_mode = False
         # No more translation_in_progress lock
 
         if not self.selected_region:
             self.text_edit.setAlignment(Qt.AlignCenter)
             self.text_edit.setText("Please select an area first.")
             return
-
-        # self.translation_in_progress = True # REMOVED
 
         if self.text_edit.toPlainText() in (self.placeholder_text, "Please select an area first."):
             self.text_edit.clear()
@@ -624,7 +673,6 @@ class TranslatorApp(QMainWindow):
         normalized = result.strip()
         if not normalized or normalized == "__NO_TEXT__":
             logging.info("No significant text found, skipping UI update.")
-            # self.translation_in_progress = False # REMOVED
             return
 
         # Prevent updating UI if the new translation is too similar to the last one
@@ -634,7 +682,6 @@ class TranslatorApp(QMainWindow):
             if similarity >= 0.85 and len(normalized) <= len(self.last_translation_result):
                 logging.info(
                     f"Skipping update – similarity {similarity:.2f} and no additional content.")
-                # self.translation_in_progress = False # REMOVED
                 return
 
         # Maintain history window
@@ -645,8 +692,8 @@ class TranslatorApp(QMainWindow):
             self.text_edit.append("")
 
         # Ensure widget layout is Right-to-Left for translations
-        self.text_edit.setLayoutDirection(Qt.RightToLeft)
-        self.text_edit.setAlignment(Qt.AlignRight)
+            self.text_edit.setLayoutDirection(Qt.RightToLeft)
+            self.text_edit.setAlignment(Qt.AlignRight)
 
         cursor = self.text_edit.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -666,7 +713,6 @@ class TranslatorApp(QMainWindow):
 
         self.text_edit.verticalScrollBar().setValue(
             self.text_edit.verticalScrollBar().maximum())
-        # self.translation_in_progress = False # REMOVED
         QApplication.processEvents()
 
     def show_placeholder(self):
@@ -676,28 +722,16 @@ class TranslatorApp(QMainWindow):
         self.clear_status()
 
     def increase_font(self):
-        self.intro_mode = False
         if self.font_size_index < len(self.font_sizes) - 1:
             self.font_size_index += 1
             self.update_font_size()
 
     def decrease_font(self):
-        self.intro_mode = False
         if self.font_size_index > 0:
             self.font_size_index -= 1
             self.update_font_size()
 
     def setup_hotkeys(self):
-        # The low-level hook handles the tilde key globally now, so this local shortcut is removed.
-        # self.shortcut_translate = QShortcut(
-        #     QKeySequence(Qt.Key_QuoteLeft), self)
-        # self.shortcut_translate.setContext(Qt.WindowShortcut)
-        # self.shortcut_translate.activated.connect(self.toggle_live_translation)
-
-        # Local select area hotkey (Alt+Q)
-        self.shortcut_select = QShortcut(QKeySequence("Alt+Q"), self)
-        self.shortcut_select.activated.connect(self.select_area)
-
         self.shortcut_inc1 = QShortcut(QKeySequence("+"), self)
         self.shortcut_inc1.activated.connect(self.increase_font)
         self.shortcut_inc2 = QShortcut(QKeySequence("="), self)
@@ -706,7 +740,9 @@ class TranslatorApp(QMainWindow):
         self.shortcut_dec = QShortcut(QKeySequence("-"), self)
         self.shortcut_dec.activated.connect(self.decrease_font)
 
+        # Restore Esc to close the app, but only when this window has focus
         self.shortcut_close = QShortcut(QKeySequence("Esc"), self)
+        self.shortcut_close.setContext(Qt.WindowShortcut)
         self.shortcut_close.activated.connect(self.close)
 
     def closeEvent(self, event):
@@ -779,7 +815,7 @@ class TranslatorApp(QMainWindow):
         # Shows a message in the dedicated status bar and clears it after a delay
         self.status_label.setText(text)
         self.status_label.show()
-        self.status_timer.start(5000) # Clears after 5 seconds
+        self.status_timer.start(STATUS_CLEAR_MS) # Clears after delay
 
     def perform_live_translation(self):
         """Slot for the monitor thread. Triggers a translation."""
@@ -793,10 +829,9 @@ class TranslatorApp(QMainWindow):
         self.start_translation()
 
     def nativeEvent(self, eventType, message):
-        # Handle global hotkeys
+        # Handle global hotkeys sent via WM_HOTKEY
         if eventType == "windows_generic_MSG":
-            msg = ctypes.cast(
-                int(message), ctypes.POINTER(wintypes.MSG)).contents
+            msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
             if msg.message == WM_HOTKEY:
                 hotkey_id = msg.wParam
                 if hotkey_id == self.alt_t_hotkey_id:
@@ -805,14 +840,15 @@ class TranslatorApp(QMainWindow):
                         self.hide()
                     else:
                         self.show()
-                        self.raise_()
                     return True, 0
-                elif hotkey_id == getattr(self, 'alt_q_hotkey_id', None):
-                    # Select translation area
+                elif hotkey_id == self.alt_q_hotkey_id:
+                    # Select screen area
                     self.select_area()
                     return True, 0
                 elif hotkey_id == self.tilde_hotkey_id:
-                    # Toggle live translation
+                    # Toggle live translation; ignore while selecting
+                    if self.selecting:
+                        return True, 0
                     self.toggle_live_translation()
                     return True, 0
                 elif hotkey_id == self.alt_k_hotkey_id:
@@ -855,13 +891,14 @@ class TranslationWorker(QObject):
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             temp_path = tmp.name
             (img_for_hash if 'img_for_hash' in locals() else Image.fromarray(screenshot_np)).save(temp_path)
-        
-        result = gemini_translate_image_request(temp_path, source_lang, target_lang, history)
-        
+
         try:
-            os.remove(temp_path)
-        except Exception:
-            pass
+            result = gemini_translate_image_request(temp_path, source_lang, target_lang, history)
+        finally:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
         if current_hash:
             TRANSLATION_CACHE[current_hash] = result
@@ -888,7 +925,7 @@ class WinOCRMonitorThread(QThread):
 
     change_detected = pyqtSignal()
 
-    def __init__(self, region, lang='en', interval=0.15, sim_thresh=0.85):  # Tuned for subtitles
+    def __init__(self, region, lang='en', interval=OCR_INTERVAL_DEFAULT, sim_thresh=OCR_SIM_THRESH_DEFAULT):  # Tuned for subtitles
         super().__init__()
         self.region = region
         self.lang = lang
@@ -956,7 +993,7 @@ class WinOCRMonitorThread(QThread):
                 is_duplicate = False
                 if self._last_emitted_text:
                     dup_ratio = SequenceMatcher(None, curr_text, self._last_emitted_text).ratio()
-                    if dup_ratio >= 0.95:
+                    if dup_ratio >= DUPLICATE_RATIO:
                         is_duplicate = True
                 
                 t3 = time.time()
@@ -982,7 +1019,7 @@ class WinOCRMonitorThread(QThread):
 
             if emit:
                 now = time.time()
-                if now - self._last_emit_time < 0.2:
+                if now - self._last_emit_time < EMIT_DEBOUNCE_SECONDS:
                     logging.info(f"Debounce: Too soon after last emit; skipping.")
                 else:
                     self.change_detected.emit()
