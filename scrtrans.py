@@ -4,7 +4,6 @@ import numpy as np
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QSizeGrip, QShortcut, QLabel, QInputDialog, QLineEdit, QDialog, QRubberBand
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QRect
 from PyQt5.QtGui import QTextCursor, QKeySequence, QGuiApplication, QCursor
-import sys
 import logging
 import time
 from google import genai
@@ -46,8 +45,32 @@ GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
 
+#############################################
+# Transgemi: on-screen region translator using Gemini vision models.
+#
+# Hotkeys:
+# - Alt+Q: select translation area (Alt+X to cancel while selecting)
+# - ~ (tilde): toggle live translation on/off
+# - Alt+K: set API key at runtime (stored only in memory during the session)
+# - Alt+L: set languages as 'src > tgt' (e.g., 'auto > arabic')
+# - Alt+T: show/hide the overlay
+# - Esc: close the app when overlay has focus
+#
+# Threads:
+# - WinOCRMonitorThread: OCRs the selected region and signals when text stabilizes.
+# - TranslationWorker: runs image hashing, caching, and Gemini translation off the UI thread.
+#
+# Rate limiting & caching:
+# - Per-call cooldown (translation_cooldown) and per-model cooldowns on 429 rate-limit errors.
+# - Lightweight LRU cache keyed by perceptual image hash.
+#############################################
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
+# API key:
+# - Preferred: press Alt+K at runtime to set it (no restarts needed).
+# - Optional: load from environment if dotenv is enabled (uncomment dotenv.load_dotenv()) and set GEMINI_API_KEY.
+# - The line below is a placeholder for local dev; avoid committing real keys.
 # dotenv.load_dotenv()
 API_KEY = "AIzaSyBYTMvbd7BPp-sK5XpNsn2Po2Ung8rKHX4"
 
@@ -207,9 +230,22 @@ def capture_screen_region(region):
 
 
 def gemini_translate_image_request(image_path, from_lang, to_lang, history=None):
-    """
-    Translate the screenshot image directly via Gemini.
-    Iterates through models sequentially. Concurrency is handled by the worker.
+    """Translate text in an image using Gemini models (tries multiple models sequentially).
+
+    Args:
+        image_path (str): Path to a PNG of the selected region.
+        from_lang (str): Source language ('auto' to let the model infer).
+        to_lang (str): Target language (e.g., 'arabic').
+        history (list[str] | None): Recent translations to preserve context/consistency.
+
+    Returns:
+        str: Pure translated text, or '__NO_TEXT__' when no readable text is found,
+             or an error string like 'Translation failed: All models unavailable'.
+
+    Notes:
+        - Applies per-model cooldown on HTTP 429 responses.
+        - Skips English-only outputs when the target is not English.
+        - Honors a minimal token budget on '2.5' models via thinking_config.
     """
     if not API_KEY:
         logging.error("Gemini API key missing. Set GEMINI_API_KEY or use Alt+K to set it at runtime.")
@@ -315,6 +351,14 @@ class DraggableTextEdit(QTextEdit):
 
 
 class TranslatorApp(QMainWindow):
+    """Topmost, draggable overlay that displays live translations.
+
+    Responsibilities:
+    - Manages UI, hotkeys, and selection of a screen region.
+    - Emits translate_requested(region, src, tgt, history, last_hash) to the worker.
+    - Maintains translation history and deduplicates similar outputs.
+    - Applies a simple per-call cooldown to avoid excessive API usage.
+    """
     # Signal for the persistent worker thread (region, src, tgt, history, last_hash)
     translate_requested = pyqtSignal(tuple, str, str, list, object)
 
@@ -630,7 +674,7 @@ class TranslatorApp(QMainWindow):
             self.selected_region = select_screen_region_with_mouse(self)
             if self.selected_region:
                 print(f"Selected region: {self.selected_region}")
-                # Restart live translation after selecting new region
+                # Toggle live translation after selecting a new region (restarts if it was on)
                 self.toggle_live_translation()
         finally:
             # Re-register tilde hotkey after selection
@@ -642,7 +686,7 @@ class TranslatorApp(QMainWindow):
             self.selecting = False
 
     def start_translation(self):
-        # No more translation_in_progress lock
+        # Single-shot: emit request to worker thread with context & last hash.
 
         if not self.selected_region:
             self.text_edit.setAlignment(Qt.AlignCenter)
@@ -819,6 +863,7 @@ class TranslatorApp(QMainWindow):
 
     def perform_live_translation(self):
         """Slot for the monitor thread. Triggers a translation."""
+        # Throttled by translation_cooldown; fires a worker job when allowed.
         if not self.live_translation or not self.selected_region:
             return
         now = time.time()
@@ -919,8 +964,14 @@ class TranslationWorker(QObject):
 
 
 class WinOCRMonitorThread(QThread):
-    """Continuously OCRs a screen region using WinOCR and emits *change_detected*
-    when two consecutive OCR results are highly similar (> sim_thresh).
+    """Continuously OCRs a screen region and emits change_detected when text stabilizes.
+
+    Emission logic:
+    - After a new appearance: emit when the last two similarity checks >= sim_thresh.
+    - Otherwise: require three consecutive similarity checks >= sim_thresh.
+    - Debounced by EMIT_DEBOUNCE_SECONDS; near-duplicates (>= DUPLICATE_RATIO) are skipped.
+
+    Tuned defaults suit subtitle-style text: short lines, frequent updates.
     """
 
     change_detected = pyqtSignal()
@@ -1038,11 +1089,11 @@ class WinOCRMonitorThread(QThread):
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    app = QApplication([])
     translator_app = TranslatorApp()
     translator_app.show()
 
     try:
-        sys.exit(app.exec_())
+        raise SystemExit(app.exec_())
     except SystemExit:
         print("Application exited.")
