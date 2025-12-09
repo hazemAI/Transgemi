@@ -1,4 +1,4 @@
-﻿# Ignore Python bytecode and caches
+# Ignore Python bytecode and caches
 __pycache__/
 *.py[cod]
 
@@ -15,4 +15,7 @@ venv/
 .idea/
 
 run_transgemi.vbs
-
+Transgemi.spec
+.ruff_cache
+tests
+scripts

@@ -1,9 +1,0 @@
-PyQt5
-Pillow
-requests
-pyautogui
-opencv-python
-numpy
-google-genai
-qasync
-imagehash

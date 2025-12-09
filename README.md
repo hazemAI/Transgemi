@@ -4,44 +4,74 @@
 
 <video src="https://github.com/user-attachments/assets/90de884e-d1c1-4feb-a3d0-0878dfe68bf9" controls="controls" style="max-width: 720px;"></video>
 
-A simple, on-the-fly screen translator that uses Windows' built-in OCR and Google's Gemini AI to translate text from a selected area of your screen.
+A simple, on-the-fly screen translator that uses Windows' built-in OCR (or RapidOCR for Asian languages) and LLM API services (Gemini, OpenRouter, Groq, etc.) to translate text from a selected area of your screen.
+
+## Features
+
+- **Multi-Engine OCR**: Automatically switches between Windows OCR (for Latin/Arabic) and RapidOCR (for Japanese/Chinese) for optimal accuracy.
+- **Multiple AI Providers**: Support for Google Gemini, OpenRouter, Groq, SambaNova, and Cerebras.
+- **Smart Auto-Translation**: Detects text stability to prevent flickering and duplicate translations.
+- **Overlay UI**: Draggable, window that stays on top of your content.
 
 ## Installation
 
-1.  Go to the [**Releases**](https://github.com/hazemAI/Transgemi/releases) page.
-2.  Download the latest `Transgemi.zip` file.
-3.  Unzip the file.
-4.  Run `Transgemi.exe` from the extracted folder.
-
-## How to Use
-
 ### Prerequisites
-Make sure you have Python installed and the required libraries. You can install them using the `requirements.txt` file:
-`pip install -r requirements.txt`
+
+- Python 3.10 or higher.
+- [uv](https://github.com/astral-sh/uv) (Recommended for fast package management) or standard `pip`.
+
+### Setup
+
+1.  Clone the repository or download the source code.
+2.  Install dependencies:
+
+    ```powershell
+    # Using uv (Recommended)
+    uv pip install .
+
+    # Using standard pip
+    pip install .
+    ```
+
+3.  Create a `.env` file in the project root (copy from `.env.example` if available) and add your API keys:
+    ```env
+    GEMINI_API_KEY=your_key_here
+    # Add other keys as needed:
+    # OPENROUTER_API_KEY=...
+    # GROQ_API_KEY=...
+    ```
+
+## Usage
 
 ### Running the Application
-1.  **Launch the App by double-clicking the `Transgemi.exe` file (Recommended for normal users)**
-2.  **Directly with Python (Need prerequisites step):** `python scrtrans.py`
+
+```powershell
+python main.py
+```
 
 ### Hotkeys
--   **`Alt + Q`**: Select a new area on the screen to translate.
--   **`~`** (Tilde key): Toggle live translation on or off for the selected area.
--   **`Alt + K`**: Set your Google Gemini API Key. A dialog will appear to paste your key.
--   **`Alt + L`**: Set source or target language for translation.
--   **`+` / `-`**: Increase or decrease the font size of the translated text.
--   **`Alt + T`**: Show or hide the translation window.
--   **`Esc`**: Close the application.
 
-### API Key
-This application requires a Google Gemini API key to function. You can generate a free key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+| Hotkey          | Description                                                                                  |
+| :-------------- | :------------------------------------------------------------------------------------------- |
+| **`Alt + Q`**   | **Select Region**: Drag to select the screen area to translate.                              |
+| **`~`** (Tilde) | **Manual Translate**: Trigger a one-time translation of the selected area.                   |
+| **`Alt + ~`**   | **Toggle Auto-Translation**: Turn continuous translation on/off.                             |
+| **`Alt + L`**   | **Language Settings**: Change source and target languages.               |
+| **`Alt + S`**   | **Switch Service**: Cycle through available translation services (Gemini, OpenRouter, etc.). |
+| **`Alt + K`**   | **Update API Key**: Quickly update the key for the current service.                          |
+| **`Alt + T`**   | **Toggle Visibility**: Hide/Show the translation overlay.                                    |
+| **`+` / `-`**   | **Font Size**: Increase or decrease text size.                                               |
+| **`Esc`**       | **Exit**: Close the application.                                                             |
 
-Use the `Alt + K` hotkey to enter your key into the application.
+## Configuration
 
-## Usage Tips
-- **If the translation feels stuck or unresponsive,** simply press `Alt + Q` to re-select the capture area. This often resets the process.
+You can configure the application via the `.env` file. Key settings include:
 
-## How It Works
-The tool captures the selected screen region, sends it to the Gemini AI for translation, and displays the result in a transparent, always-on-top window. It rotates through different Gemini models to manage API rate limits and caches results to improve performance.
+- `TRANSLATION_SERVICE`: Translation service to use (e.g., `gemini`, `openrouter`, `groq`).
+- `TARGET_LANGUAGE`: Target language (e.g., `English`).
+- `OCR_MONITOR_INTERVAL`: How often to check for text changes in auto mode.
+- `OCR_SIMILARITY_THRESHOLD`: Sensitivity for detecting text changes.
 
 ## Inspiration
-This project was inspired by the excellent [Translumo](https://github.com/Danily07/Translumo) project. 
+
+This project was inspired by the excellent [Translumo](https://github.com/Danily07/Translumo) project.
