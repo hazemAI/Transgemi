@@ -14,7 +14,8 @@ venv/
 .vscode/
 .idea/
 
-run_transgemi.vbs
+# Other
+legacy
 Transgemi.spec
 .ruff_cache
 tests
