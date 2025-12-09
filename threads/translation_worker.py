@@ -1,5 +1,8 @@
 import logging
 import time
+import collections
+import concurrent.futures
+from difflib import SequenceMatcher
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
@@ -7,27 +10,23 @@ from services.translation_service_factory import TranslationServiceFactory
 
 
 class TranslationWorker(QObject):
-    """Worker for background translation.
-
-    Runs one translation at a time in a dedicated QThread.
-    Used by both manual and auto translation modes.
-    """
-
-    # Signals
-    translation_finished = pyqtSignal(
-        str, float, object
-    )  # (translation_text, timestamp, image_hash)
-    translation_error = pyqtSignal(str)  # (error_message)
+    translation_finished = pyqtSignal(str, float, object)
+    translation_error = pyqtSignal(str)
 
     def __init__(self, config_manager):
         super().__init__()
         self.config = config_manager
         self.service = None
-        self.cache = {}  # Translation cache
+        self.cache = {}
+        self.text_cache = collections.OrderedDict()
+        self.max_text_cache_size = 50
+        self.duplicate_ratio = 0.92
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=5, thread_name_prefix="Translator"
+        )
         self._refresh_service()
 
     def _refresh_service(self):
-        """Refresh translation service from config."""
         try:
             self.service = TranslationServiceFactory.create_service(self.config)
             logging.info(
@@ -37,17 +36,37 @@ class TranslationWorker(QObject):
             logging.error("Failed to initialize translation service: %s", exc)
             self.service = None
 
-    @pyqtSlot(object, object)
-    def translate_frame(self, screenshot_np, region, precomputed_ocr=None):
-        """Translate a captured frame (manual mode).
+    def _check_text_cache(self, ocr_text):
+        if not ocr_text:
+            return None
+        for cached_text, cached_result in reversed(self.text_cache.items()):
+            sim = SequenceMatcher(None, ocr_text, cached_text).ratio()
+            if sim >= self.duplicate_ratio:
+                logging.info(
+                    "Text cache hit (sim=%.2f): '%s' -> '%s'",
+                    sim,
+                    ocr_text[:30],
+                    cached_result[:30],
+                )
+                return cached_result
+        return None
 
-        Args:
-            screenshot_np: Screenshot as numpy array
-            region: Screen region tuple (x, y, width, height)
-            precomputed_ocr: Optional tuple (text, conf, duration_ms) from auto monitor
-        """
+    def _add_to_text_cache(self, ocr_text, result):
+        if not ocr_text or not result:
+            return
+        self.text_cache[ocr_text] = result
+        if len(self.text_cache) > self.max_text_cache_size:
+            self.text_cache.popitem(last=False)
+
+    def _execute_translation(self, screenshot_np, region, precomputed_ocr, timestamp):
         if screenshot_np is None:
             self.translation_error.emit("Screenshot capture failed")
+            return
+
+        ocr_text = precomputed_ocr[0] if precomputed_ocr else None
+        cached_result = self._check_text_cache(ocr_text)
+        if cached_result:
+            self.translation_finished.emit(cached_result, timestamp, None)
             return
 
         if self.service is None:
@@ -57,19 +76,18 @@ class TranslationWorker(QObject):
                 return
 
         try:
-            timestamp = time.time()
-
-            # Perform translation (OCR + translation handled by service)
             result, image_hash = self.service.get_or_translate(
                 region=region,
                 screenshot_np=screenshot_np,
-                cache=self.cache,  # Use instance cache
-                history=[],  # No history for manual mode
+                cache=self.cache,
+                history=[],
                 last_hash=None,
                 precomputed_ocr=precomputed_ocr,
             )
 
             if result and result != "__NO_TEXT__":
+                if ocr_text:
+                    self._add_to_text_cache(ocr_text, result)
                 self.translation_finished.emit(result, timestamp, image_hash)
             else:
                 self.translation_error.emit("No text detected in selected area")
@@ -78,6 +96,19 @@ class TranslationWorker(QObject):
             logging.error("Translation failed: %s", exc)
             self.translation_error.emit(f"Translation failed: {exc}")
 
+    @pyqtSlot(object, object)
+    def translate_frame(self, screenshot_np, region, precomputed_ocr=None):
+        timestamp = time.time()
+        self.executor.submit(
+            self._execute_translation,
+            screenshot_np,
+            region,
+            precomputed_ocr,
+            timestamp,
+        )
+
     def refresh_service(self):
-        """Public method to refresh service (e.g., when user changes service)."""
         self._refresh_service()
+
+    def shutdown(self):
+        self.executor.shutdown(wait=False)

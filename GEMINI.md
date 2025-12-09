@@ -69,7 +69,7 @@ Set the following environment variables in `.env` (defaults shown):
 
 ### Translation Service
 
-- `TRANSLATION_SERVICE` (default `gemini`)
+- `TRANSLATION_SERVICE`
 
 ### AI Provider API Keys & Models
 
@@ -94,12 +94,11 @@ Set the following environment variables in `.env` (defaults shown):
 
 ### OCR Monitor (Auto Mode)
 
-- `OCR_MONITOR_INTERVAL` - Polling interval in seconds (default: 0.05)
-- `OCR_MONITOR_LANG` - Language code for OCR (default: zh-CN)
-- `OCR_SIMILARITY_THRESHOLD` - Minimum similarity to consider text stable (default: 0.85)
-- `OCR_DUPLICATE_RATIO` - Similarity to reject near-duplicates (default: 0.95)
-- `OCR_DEBOUNCE_SECONDS` - Minimum gap between emissions to prevent rapid-fire translations (default: 0.2)
-- `SOURCE_LANGUAGE` - Source language for OCR engine selection: `ja`/`zh` use RapidOCR, `en` uses WinOCR (default: ja)
+- `OCR_MONITOR_INTERVAL` - Polling interval in seconds
+- `OCR_SIMILARITY_THRESHOLD` - Minimum similarity to consider text stable
+- `OCR_DUPLICATE_RATIO` - Similarity to reject near-duplicates
+- `OCR_DEBOUNCE_SECONDS` - Minimum gap between emissions to prevent rapid-fire translations
+- `SOURCE_LANGUAGE` - Source language for OCR engine selection: `ja`/`zh` use RapidOCR, `en` uses WinOCR
 
 ### UI Settings
 

@@ -1,5 +1,6 @@
 import logging
 import time
+import collections
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -12,7 +13,7 @@ class AutoOCRMonitor(QThread):
     """Continuously OCRs a screen region and emits change_detected when text stabilizes.
 
     Emission logic:
-    - Requires consecutive frames to be similar (Curr ≈ Prev).
+    - Requires consecutive frames to be similar.
     - Similarity check must be >= sim_thresh to emit.
     - Debounced by debounce_seconds; near-duplicates (>= duplicate_ratio) are skipped.
 
@@ -25,34 +26,33 @@ class AutoOCRMonitor(QThread):
         self,
         region: tuple,
         capture_func,
-        lang: str,
         source_lang: str,
         interval: float,
         sim_thresh: float,
         duplicate_ratio: float,
         debounce_seconds: float,
+        stability_frames: int = 3,
     ):
         super().__init__()
         self.region = region
         self.capture_func = capture_func
-        self.lang = lang
         self.source_lang = source_lang.lower()
         self.interval = interval
         self.sim_thresh = sim_thresh
         self.duplicate_ratio = duplicate_ratio
         self.debounce_seconds = debounce_seconds
+        self.stability_frames = max(2, min(4, stability_frames))
 
         logging.info(
-            "AutoOCRMonitor initialized: source_lang=%s, lang=%s, interval=%.2fs, sim_thresh=%.2f",
+            "AutoOCRMonitor initialized: source_lang=%s, interval=%.2fs, sim_thresh=%.2f, stability_frames=%d",
             self.source_lang,
-            self.lang,
             self.interval,
             self.sim_thresh,
+            self.stability_frames,
         )
 
         self._running = True
-        self._prev_text: Optional[str] = None
-        self._prev_prev_text: Optional[str] = None
+        self._text_history: collections.deque = collections.deque(maxlen=4)
         self._last_emitted_text: Optional[str] = None
         self._recent_appearance = False
         self._last_change_time = time.time()
@@ -61,11 +61,24 @@ class AutoOCRMonitor(QThread):
     def stop(self):
         self._running = False
 
+    def _check_stability(self):
+        if len(self._text_history) < self.stability_frames:
+            return False, []
+
+        texts = list(self._text_history)[-self.stability_frames :]
+        similarities = []
+        for i in range(len(texts) - 1):
+            sim = SequenceMatcher(None, texts[i], texts[i + 1]).ratio()
+            similarities.append(sim)
+            if sim < self.sim_thresh:
+                return False, similarities
+
+        return True, similarities
+
     def run(self):
         while self._running:
             t0 = time.time()
 
-            # Capture frame
             frame = self.capture_func(self.region)
             if frame is None:
                 time.sleep(self.interval)
@@ -73,15 +86,14 @@ class AutoOCRMonitor(QThread):
 
             t1 = time.time()
 
-            # Perform OCR for stability check (route based on source language)
             try:
-                use_rapidocr = self.source_lang in ("ja", "japanese", "zh", "chinese")
+                use_rapidocr = self.source_lang in ("zh", "chinese")
                 use_winocr = not use_rapidocr
                 rec_model_path = (
                     None if use_winocr else "models/ch_PP-OCRv5_rec_infer.onnx"
                 )
 
-                ocr_lang = self.source_lang if use_winocr else self.lang
+                ocr_lang = self.source_lang
 
                 curr_text, curr_conf, engine = extract_subtitle_text(
                     frame,
@@ -101,78 +113,59 @@ class AutoOCRMonitor(QThread):
                 time.sleep(self.interval)
                 continue
 
-            # Check if we should stop after OCR (for faster response)
             if not self._running:
                 break
 
             t2 = time.time()
             ocr_duration_ms = (t2 - t1) * 1000
 
-            # Handle empty text
             if not curr_text:
-                if self._prev_text:  # Detect disappearance
-                    self._recent_appearance = False
-                self._prev_prev_text = self._prev_text
-                self._prev_text = curr_text
+                self._text_history.append("")
                 time.sleep(self.interval)
                 continue
 
-            # Stability and duplicate checks
+            self._text_history.append(curr_text)
+
+            is_stable, similarities = self._check_stability()
+
+            is_duplicate = False
+            if self._last_emitted_text:
+                dup_ratio = SequenceMatcher(
+                    None, curr_text, self._last_emitted_text
+                ).ratio()
+                if dup_ratio >= self.duplicate_ratio:
+                    is_duplicate = True
+
+            t3 = time.time()
+            time_since_change = time.time() - self._last_change_time
+            timing_log = (
+                f"Timings(ms): Capture={int((t1 - t0) * 1000)}, "
+                f"OCR={int(ocr_duration_ms)}, Logic={int((t3 - t2) * 1000)}. "
+                f"Since change: {time_since_change:.2f}s"
+            )
+
             emit = False
-            if self._prev_text is not None:
-                # Calculate similarities
-                sim = SequenceMatcher(None, curr_text, self._prev_text).ratio()
-                sim_prev = 0.0
-                if self._prev_prev_text is not None:
-                    sim_prev = SequenceMatcher(
-                        None, self._prev_text, self._prev_prev_text
-                    ).ratio()
-
-                # Detect new appearance
-                if not self._prev_text and curr_text:
-                    self._recent_appearance = True
-                    self._last_change_time = time.time()
-
-                # Check for duplicates
-                is_duplicate = False
-                if self._last_emitted_text:
-                    dup_ratio = SequenceMatcher(
-                        None, curr_text, self._last_emitted_text
-                    ).ratio()
-                    if dup_ratio >= self.duplicate_ratio:
-                        is_duplicate = True
-
-                t3 = time.time()
-
-                time_since_change = time.time() - self._last_change_time
-                timing_log = (
-                    f"Timings(ms): Capture={int((t1 - t0) * 1000)}, "
-                    f"OCR={int(ocr_duration_ms)}, Logic={int((t3 - t2) * 1000)}. "
-                    f"Since change: {time_since_change:.2f}s"
+            if is_duplicate:
+                logging.debug(
+                    "Skipping near-duplicate (ratio %.2f). %s",
+                    dup_ratio,
+                    timing_log,
+                )
+            elif is_stable:
+                emit = True
+                logging.info(
+                    "Stability emission (%d-frame, sims=%s). %s",
+                    self.stability_frames,
+                    [f"{s:.2f}" for s in similarities],
+                    timing_log,
+                )
+            else:
+                logging.info(
+                    "Chain below threshold (sims=%s). %s",
+                    [f"{s:.2f}" for s in similarities] if similarities else "[]",
+                    timing_log,
                 )
 
-                if is_duplicate:
-                    logging.debug(
-                        "Skipping near-duplicate (ratio %.2f). %s",
-                        dup_ratio,
-                        timing_log,
-                    )
-                else:
-                    # 2-frame stability check (curr matches prev)
-                    if sim >= self.sim_thresh:
-                        emit = True
-                        logging.info("Stability emission (2-frame). %s", timing_log)
-                        self._recent_appearance = False
-
-                if not emit and not is_duplicate:
-                    logging.info(
-                        "Chain below threshold (sim=%.2f, sim_prev=%.2f). %s",
-                        sim,
-                        sim_prev,
-                        timing_log,
-                    )
-
-            # Emit signal if stable and debounced
             if emit:
                 now = time.time()
                 if now - self._last_emit_time < self.debounce_seconds:
@@ -184,11 +177,6 @@ class AutoOCRMonitor(QThread):
                     self._last_emit_time = now
                     self._last_change_time = now
 
-            # Update history
-            self._prev_prev_text = self._prev_text
-            self._prev_text = curr_text
-
-            # Sleep to maintain interval
             elapsed = time.time() - t0
             sleep_time = self.interval - elapsed
             if sleep_time > 0:

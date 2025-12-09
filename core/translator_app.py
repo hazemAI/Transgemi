@@ -639,12 +639,12 @@ class TranslatorApp(QMainWindow):
         self.ocr_monitor = AutoOCRMonitor(
             region=self.selected_region,
             capture_func=self.capture_screen_region,
-            lang=self.config.ocr_monitor_lang,
             source_lang=self.config.source_language,
             interval=self.config.ocr_monitor_interval,
             sim_thresh=self.config.ocr_similarity_threshold,
             duplicate_ratio=self.config.ocr_duplicate_ratio,
             debounce_seconds=self.config.ocr_debounce_seconds,
+            stability_frames=self.config.ocr_stability_frames,
         )
         self.ocr_monitor.change_detected.connect(self._on_ocr_change_detected)
         self.ocr_monitor.start()
@@ -659,10 +659,6 @@ class TranslatorApp(QMainWindow):
     def _on_ocr_change_detected(self, frame, ocr_data=None):
         """Handle change_detected signal from OCR monitor (text stabilized)."""
         if not self.auto_translation_enabled or self.auto_translation_paused:
-            return
-
-        # Skip if translation is already in progress (prevent flooding)
-        if self.pending_translations > 0:
             return
 
         try:
@@ -818,6 +814,8 @@ class TranslatorApp(QMainWindow):
         self._stop_auto_translation()
 
         # Cleanup translation worker thread
+        if hasattr(self, "translation_worker") and self.translation_worker:
+            self.translation_worker.shutdown()
         if (
             hasattr(self, "translation_worker_thread")
             and self.translation_worker_thread.isRunning()

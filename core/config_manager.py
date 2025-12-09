@@ -83,12 +83,12 @@ class ConfigManager:
 
         # OCR Monitor Thread (Defaults handled in AutoOCRMonitor)
         self._ocr_monitor_interval = float(os.getenv("OCR_MONITOR_INTERVAL", "0.15"))
-        self._ocr_monitor_lang = os.getenv("OCR_MONITOR_LANG", "en")
         self._ocr_similarity_threshold = float(
             os.getenv("OCR_SIMILARITY_THRESHOLD", "0.85")
         )
         self._ocr_duplicate_ratio = float(os.getenv("OCR_DUPLICATE_RATIO", "0.95"))
         self._ocr_debounce_seconds = float(os.getenv("OCR_DEBOUNCE_SECONDS", "0.2"))
+        self._ocr_stability_frames = int(os.getenv("OCR_STABILITY_FRAMES", "3"))
 
         self._source_language = os.getenv("SOURCE_LANGUAGE", "ja").lower()
         self._target_language = os.getenv("TARGET_LANGUAGE", "en").lower()
@@ -345,10 +345,6 @@ class ConfigManager:
         return self._ocr_monitor_interval
 
     @property
-    def ocr_monitor_lang(self) -> str:
-        return self._ocr_monitor_lang
-
-    @property
     def ocr_similarity_threshold(self) -> float:
         return self._ocr_similarity_threshold
 
@@ -359,6 +355,10 @@ class ConfigManager:
     @property
     def ocr_debounce_seconds(self) -> float:
         return self._ocr_debounce_seconds
+
+    @property
+    def ocr_stability_frames(self) -> int:
+        return max(2, min(4, self._ocr_stability_frames))
 
     @property
     def source_language(self) -> str:
