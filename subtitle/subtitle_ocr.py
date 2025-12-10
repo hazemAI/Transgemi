@@ -5,7 +5,8 @@ from typing import Optional, Tuple
 import numpy as np
 import cv2
 from winocr import recognize_cv2_sync
-from rapidocr_onnxruntime import RapidOCR
+
+RapidOCR = None
 
 from subtitle.language_pack_manager import ensure_language_pack
 
@@ -40,9 +41,13 @@ def _ensure_winocr_language_pack(lang: str = "en") -> None:
 def _get_rapidocr_engine(
     rec_model_path: Optional[str] = None,
     keys_path: Optional[str] = None,
-) -> RapidOCR:
-    """Get or create RapidOCR engine instance."""
-    global _engines
+):
+    global _engines, RapidOCR
+
+    if RapidOCR is None:
+        from rapidocr_onnxruntime import RapidOCR as _RapidOCR
+
+        RapidOCR = _RapidOCR
 
     config_key = (rec_model_path, keys_path)
 

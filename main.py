@@ -1,7 +1,3 @@
-"""
-Main entry point for the translation application
-"""
-
 import sys
 # Pre-import onnxruntime to prevent DLL load errors with PyQt5
 try:

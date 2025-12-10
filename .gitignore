@@ -15,8 +15,8 @@ venv/
 .idea/
 
 # Other
-legacy
-Transgemi.spec
 .ruff_cache
+legacy
 tests
 scripts
+build
