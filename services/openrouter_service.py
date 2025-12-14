@@ -197,7 +197,9 @@ class OpenRouterTranslationService(TranslationService):
             return ""
 
         prompt = build_image_translation_prompt(
-            target_lang=self.config.target_language, history=history
+            target_lang=self.config.target_language,
+            source_lang=self.config.source_language,
+            history=history,
         )
 
         model_name = self.config.openrouter_model

@@ -8,7 +8,7 @@ A simple, on-the-fly screen translator that uses WinOCR (or RapidOCR for Asian l
 
 ## Features
 
-- **Multi-Engine OCR**: Automatically switches between Windows OCR (for Latin/Arabic) and RapidOCR (for Japanese/Chinese) for optimal accuracy.
+- **Multi-Engine OCR**: Automatically switches between Windows OCR (for Latin/Arabic/Japanese) and RapidOCR (for Chinese) for optimal accuracy.
 - **Multiple AI Providers**: Support for Google Gemini, OpenRouter, Groq, SambaNova, and Cerebras.
 - **Smart Auto-Translation**: Detects text stability to prevent flickering and duplicate translations.
 - **Overlay UI**: Draggable, window that stays on top of your content.
@@ -56,7 +56,7 @@ python main.py
 | **`Alt + Q`**   | **Select Region**: Drag to select the screen area to translate.                              |
 | **`~`** (Tilde) | **Manual Translate**: Trigger a one-time translation of the selected area.                   |
 | **`Alt + ~`**   | **Toggle Auto-Translation**: Turn continuous translation on/off.                             |
-| **`Alt + L`**   | **Language Settings**: Change source and target languages.               |
+| **`Alt + L`**   | **Language Settings**: Change source and target languages.                                   |
 | **`Alt + S`**   | **Switch Service**: Cycle through available translation services (Gemini, OpenRouter, etc.). |
 | **`Alt + K`**   | **Update API Key**: Quickly update the key for the current service.                          |
 | **`Alt + T`**   | **Toggle Visibility**: Hide/Show the translation overlay.                                    |

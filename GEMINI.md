@@ -12,7 +12,7 @@
 - Hotkey-driven workflow for capture, translation trigger (~), API key entry (Alt+K), source language (Alt+L), service switching (Alt+S), visibility toggling (Alt+T), auto-translation toggle (Alt+~), and font size adjustment (+/-)
 - Background worker that hashes captures, caches responses, and avoids duplicate translations for efficiency
 - Auto-translation mode with OCR-based text stability detection (2-frame consistency check) and similarity-based duplicate rejection
-- Source language selection (Alt+L) that routes to RapidOCR for Japanese/Chinese and WinOCR for English
+- Source language selection (Alt+L) that routes to RapidOCR for Chinese and WinOCR for English/Japanese
 - Translation services for Gemini, OpenRouter, Groq, SambaNova, and Cerebras, each handling image capture, hashing, and API calls with shared caching and rate-limit awareness plus aligned key-rotation error handling
 
 ## Architecture
@@ -98,7 +98,7 @@ Set the following environment variables in `.env` (defaults shown):
 - `OCR_SIMILARITY_THRESHOLD` - Minimum similarity to consider text stable
 - `OCR_DUPLICATE_RATIO` - Similarity to reject near-duplicates
 - `OCR_DEBOUNCE_SECONDS` - Minimum gap between emissions to prevent rapid-fire translations
-- `SOURCE_LANGUAGE` - Source language for OCR engine selection: `ja`/`zh` use RapidOCR, `en` uses WinOCR
+- `SOURCE_LANGUAGE` - Source language for OCR engine selection: `zh` uses RapidOCR, `en`/`ja` use WinOCR
 
 ### UI Settings
 

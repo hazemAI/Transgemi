@@ -31,6 +31,8 @@ class AutoOCRMonitor(QThread):
         sim_thresh: float,
         duplicate_ratio: float,
         debounce_seconds: float,
+        min_confidence: float = 0.55,
+        max_lines: int = 2,
         stability_frames: int = 3,
     ):
         super().__init__()
@@ -41,6 +43,8 @@ class AutoOCRMonitor(QThread):
         self.sim_thresh = sim_thresh
         self.duplicate_ratio = duplicate_ratio
         self.debounce_seconds = debounce_seconds
+        self.min_confidence = min_confidence
+        self.max_lines = max_lines
         self.stability_frames = max(2, min(4, stability_frames))
 
         logging.info(
@@ -100,6 +104,8 @@ class AutoOCRMonitor(QThread):
                     lang=ocr_lang,
                     use_winocr=use_winocr,
                     rec_model_path=rec_model_path,
+                    min_confidence=self.min_confidence,
+                    max_lines=self.max_lines,
                 )
                 curr_text = curr_text.strip()
                 logging.info(

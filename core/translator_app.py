@@ -99,8 +99,6 @@ class TranslatorApp(QMainWindow):
         self.history_enabled = False
         self.last_processed_hash = None
         self.pending_translations = 0
-        self.translation_cooldown = self.config.translation_cooldown
-        self.auto_translation_interval = max(0.2, self.config.auto_translation_interval)
         self.auto_translation_enabled = self.config.auto_translation_enabled
         self.auto_translation_paused = False
         self.placeholder_active = False
@@ -645,6 +643,8 @@ class TranslatorApp(QMainWindow):
             duplicate_ratio=self.config.ocr_duplicate_ratio,
             debounce_seconds=self.config.ocr_debounce_seconds,
             stability_frames=self.config.ocr_stability_frames,
+            min_confidence=self.config.subtitle_ocr_min_confidence,
+            max_lines=self.config.subtitle_ocr_max_lines,
         )
         self.ocr_monitor.change_detected.connect(self._on_ocr_change_detected)
         self.ocr_monitor.start()
@@ -701,7 +701,7 @@ class TranslatorApp(QMainWindow):
         ):
             self.status_timer.stop()
         else:
-            self.status_timer.start(5000)
+            self.status_timer.start(self.config.status_clear_ms)
 
     def _refresh_auto_status_label(self) -> None:
         if not self.auto_status_label:

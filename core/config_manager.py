@@ -47,7 +47,6 @@ class ConfigManager:
         self._frequency_penalty = float(os.getenv("FREQUENCY_PENALTY", "0.0"))
         self._presence_penalty = float(os.getenv("PRESENCE_PENALTY", "0.0"))
 
-        self._translation_cooldown = float(os.getenv("TRANSLATION_COOLDOWN", "0.0"))
         auto_translation_raw = (
             os.getenv("AUTO_TRANSLATION_ENABLED", "0").strip().lower()
         )
@@ -56,17 +55,13 @@ class ConfigManager:
             "false",
             "no",
         }
-        self._auto_translation_interval = float(
-            os.getenv("AUTO_TRANSLATION_INTERVAL", "0.3")
-        )
+
         self._status_clear_ms = int(os.getenv("STATUS_CLEAR_MS", "5000"))
         self._duplicate_ratio = float(os.getenv("DUPLICATE_RATIO", "0.95"))
         self._max_cache_size = int(os.getenv("MAX_CACHE_SIZE", "100"))
         self._cooldown_seconds = int(os.getenv("COOLDOWN_SECONDS", "60"))
         self._auto_max_backlog = int(os.getenv("AUTO_MAX_BACKLOG", "0"))
-        self._subtitle_ocr_downsample_width = int(
-            os.getenv("SUBTITLE_OCR_DOWNSAMPLE_WIDTH", "2000")
-        )
+
         self._subtitle_ocr_min_confidence = float(
             os.getenv("SUBTITLE_OCR_MIN_CONFIDENCE", "0.55")
         )
@@ -249,14 +244,6 @@ class ConfigManager:
         return self._presence_penalty
 
     @property
-    def translation_cooldown(self) -> float:
-        return self._translation_cooldown
-
-    @translation_cooldown.setter
-    def translation_cooldown(self, value: float) -> None:
-        self._translation_cooldown = value
-
-    @property
     def auto_translation_enabled(self) -> bool:
         return self._auto_translation_enabled
 
@@ -264,17 +251,6 @@ class ConfigManager:
     def auto_translation_enabled(self, value: bool) -> None:
         self._auto_translation_enabled = value
         self._write_env_value("AUTO_TRANSLATION_ENABLED", "1" if value else "0")
-
-    @property
-    def auto_translation_interval(self) -> float:
-        return max(0.05, self._auto_translation_interval)
-
-    @auto_translation_interval.setter
-    def auto_translation_interval(self, value: float) -> None:
-        self._auto_translation_interval = max(0.05, float(value))
-        self._write_env_value(
-            "AUTO_TRANSLATION_INTERVAL", f"{self._auto_translation_interval:.3f}"
-        )
 
     @property
     def status_clear_ms(self) -> int:
@@ -300,10 +276,6 @@ class ConfigManager:
     def auto_max_backlog(self, value: int) -> None:
         self._auto_max_backlog = max(0, int(value))
         self._write_env_value("AUTO_MAX_BACKLOG", str(self._auto_max_backlog))
-
-    @property
-    def subtitle_ocr_downsample_width(self) -> int:
-        return self._subtitle_ocr_downsample_width
 
     @property
     def subtitle_ocr_min_confidence(self) -> float:

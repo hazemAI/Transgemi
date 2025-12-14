@@ -1,6 +1,7 @@
 # Simple translation prompt
 simple_translation_prompt = """
 You are a subtitle translator.
+Source Language: {source_lang}
 Translate ALL text visible in this image into {target_lang}.
 CRITICAL RULES:
 - Output ONLY the {target_lang} translation
@@ -21,6 +22,23 @@ Exact Meaning:
 Example:
 你好 (nǐ hǎo) : hello; hi
 世界 (shì jiè) : world
+
+Sentence Meaning:
+[Provide a natural, faithful English paraphrase of the full sentence. Do not add notes, explanations, or context. Output ONLY the translation.]
+"""
+
+# Detailed Japanese translation prompt
+detailed_japanese_translation_prompt = """
+Translate the Japanese subtitle following this exact format with empty lines between sections:
+
+Full Sentence Romaji:
+[Preserve all Japanese punctuation, then provide Hepburn romaji for every word]
+
+Exact Meaning:
+[List each Japanese word or phrase on a separate line. Format: Japanese (romaji) : meaning1; meaning2]
+Example:
+こんにちは (konnichiwa) : hello; good day
+世界 (sekai) : world
 
 Sentence Meaning:
 [Provide a natural, faithful English paraphrase of the full sentence. Do not add notes, explanations, or context. Output ONLY the translation.]

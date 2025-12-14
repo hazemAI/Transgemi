@@ -9,6 +9,7 @@ from .prompts import simple_translation_prompt
 
 def build_image_translation_prompt(
     target_lang: str = "English",
+    source_lang: str = "Auto",
     history: Optional[List[str]] = None,
     history_limit: int = 3,
 ) -> str:
@@ -25,8 +26,11 @@ def build_image_translation_prompt(
         "ru": "Russian",
     }
     full_target_lang = lang_map.get(target_lang.lower(), target_lang)
+    full_source_lang = lang_map.get(source_lang.lower(), source_lang)
 
-    prompt = prompt_template.format(target_lang=full_target_lang)
+    prompt = prompt_template.format(
+        target_lang=full_target_lang, source_lang=full_source_lang
+    )
 
     if history:
         trimmed_history = [item.strip() for item in history if item and item.strip()]

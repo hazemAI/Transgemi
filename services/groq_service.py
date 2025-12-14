@@ -100,7 +100,9 @@ class GroqTranslationService(TranslationService):
             return ""
 
         prompt = build_image_translation_prompt(
-            target_lang=self.config.target_language, history=history
+            target_lang=self.config.target_language,
+            source_lang=self.config.source_language,
+            history=history,
         )
 
         messages: List[Dict[str, Any]] = [
