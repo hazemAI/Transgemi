@@ -75,6 +75,8 @@ class ConfigManager:
         self._font_size = int(os.getenv("FONT_SIZE", "22"))
         self._overlay_width = int(os.getenv("OVERLAY_WIDTH", "300"))
         self._overlay_height = int(os.getenv("OVERLAY_HEIGHT", "700"))
+        self._overlay_x = self._parse_optional_int(os.getenv("OVERLAY_X", ""))
+        self._overlay_y = self._parse_optional_int(os.getenv("OVERLAY_Y", ""))
 
         # OCR Monitor Thread (Defaults handled in AutoOCRMonitor)
         self._ocr_monitor_interval = float(os.getenv("OCR_MONITOR_INTERVAL", "0.15"))
@@ -96,6 +98,14 @@ class ConfigManager:
             except ValueError:
                 return None
         return None
+
+    def _parse_optional_int(self, val: str) -> Optional[int]:
+        if val is None or val.strip() == "":
+            return None
+        try:
+            return int(val)
+        except ValueError:
+            return None
 
     @property
     def translation_service(self) -> str:
@@ -311,6 +321,24 @@ class ConfigManager:
     def overlay_height(self, value: int) -> None:
         self._overlay_height = value
         self._write_env_value("OVERLAY_HEIGHT", str(value))
+
+    @property
+    def overlay_x(self) -> Optional[int]:
+        return self._overlay_x
+
+    @overlay_x.setter
+    def overlay_x(self, value: int) -> None:
+        self._overlay_x = value
+        self._write_env_value("OVERLAY_X", str(value))
+
+    @property
+    def overlay_y(self) -> Optional[int]:
+        return self._overlay_y
+
+    @overlay_y.setter
+    def overlay_y(self, value: int) -> None:
+        self._overlay_y = value
+        self._write_env_value("OVERLAY_Y", str(value))
 
     @property
     def ocr_monitor_interval(self) -> float:

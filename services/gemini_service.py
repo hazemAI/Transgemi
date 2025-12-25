@@ -255,7 +255,14 @@ class GeminiTranslationService(TranslationService):
         self, api_key: str, exc: TranslationServiceError
     ) -> None:
         detail = str(exc).lower()
-        if "permission" in detail or "invalid" in detail or "unauthorized" in detail:
+        if any(
+            token in detail
+            for token in (
+                "permission",
+                "invalid",
+                "unauthorized",
+            )
+        ):
             self._remove_key(api_key)
             return
 

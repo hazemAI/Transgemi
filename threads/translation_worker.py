@@ -11,7 +11,7 @@ from services.translation_service_factory import TranslationServiceFactory
 
 class TranslationWorker(QObject):
     translation_finished = pyqtSignal(str, float, object)
-    translation_error = pyqtSignal(str)
+    translation_error = pyqtSignal(str, float)
 
     def __init__(self, config_manager):
         super().__init__()
@@ -22,7 +22,7 @@ class TranslationWorker(QObject):
         self.max_text_cache_size = 50
         self.duplicate_ratio = 0.92
         self.executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=5, thread_name_prefix="Translator"
+            max_workers=2, thread_name_prefix="Translator"
         )
         self._refresh_service()
 
@@ -58,53 +58,74 @@ class TranslationWorker(QObject):
         if len(self.text_cache) > self.max_text_cache_size:
             self.text_cache.popitem(last=False)
 
-    def _execute_translation(self, screenshot_np, region, precomputed_ocr, timestamp):
+    def _execute_translation(
+        self, screenshot_np, region, precomputed_ocr, timestamp, manual=False
+    ):
         if screenshot_np is None:
-            self.translation_error.emit("Screenshot capture failed")
+            self.translation_error.emit("Screenshot capture failed", timestamp)
             return
 
         ocr_text = precomputed_ocr[0] if precomputed_ocr else None
-        cached_result = self._check_text_cache(ocr_text)
-        if cached_result:
-            self.translation_finished.emit(cached_result, timestamp, None)
-            return
+
+        # Skip text cache check in manual mode
+        if not manual:
+            cached_result = self._check_text_cache(ocr_text)
+            if cached_result:
+                self.translation_finished.emit(cached_result, timestamp, None)
+                return
 
         if self.service is None:
             self._refresh_service()
             if self.service is None:
-                self.translation_error.emit("Translation service not available")
+                self.translation_error.emit(
+                    "Translation service not available", timestamp
+                )
                 return
 
         try:
+            # Use empty cache in manual mode to force fresh translation
+            cache_to_use = {} if manual else self.cache
+
             result, image_hash = self.service.get_or_translate(
                 region=region,
                 screenshot_np=screenshot_np,
-                cache=self.cache,
+                cache=cache_to_use,
                 history=[],
                 last_hash=None,
                 precomputed_ocr=precomputed_ocr,
             )
 
             if result and result != "__NO_TEXT__":
-                if ocr_text:
+                if ocr_text and not manual:
                     self._add_to_text_cache(ocr_text, result)
                 self.translation_finished.emit(result, timestamp, image_hash)
             else:
-                self.translation_error.emit("No text detected in selected area")
+                self.translation_error.emit(
+                    "No text detected in selected area", timestamp
+                )
 
         except Exception as exc:
             logging.error("Translation failed: %s", exc)
-            self.translation_error.emit(f"Translation failed: {exc}")
+            self.translation_error.emit(f"Translation failed: {exc}", timestamp)
 
     @pyqtSlot(object, object)
-    def translate_frame(self, screenshot_np, region, precomputed_ocr=None):
-        timestamp = time.time()
+    def translate_frame(
+        self,
+        screenshot_np,
+        region,
+        precomputed_ocr=None,
+        manual=False,
+        timestamp=None,
+    ):
+        if timestamp is None:
+            timestamp = time.time()
         self.executor.submit(
             self._execute_translation,
             screenshot_np,
             region,
             precomputed_ocr,
             timestamp,
+            manual,
         )
 
     def refresh_service(self):

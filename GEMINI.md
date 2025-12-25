@@ -102,7 +102,7 @@ Set the following environment variables in `.env` (defaults shown):
 
 ### UI Settings
 
-- `FONT_SIZE`, `OVERLAY_WIDTH`, `OVERLAY_HEIGHT`
+- `FONT_SIZE`, `OVERLAY_WIDTH`, `OVERLAY_HEIGHT`, `OVERLAY_X`, `OVERLAY_Y`
 
 ## Usage Flow
 

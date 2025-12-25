@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from core.config_manager import ConfigManager
 from subtitle.utils import build_image_translation_prompt, encode_image_to_base64
+from threads.translation_errors import TranslationServiceError
 from threads.translation_interface import TranslationService
 
 
@@ -140,9 +141,11 @@ class SambaNovaTranslationService(TranslationService):
         try:
             image_b64 = encode_image_to_base64(screenshot_np)
             result = self._translate_image(image_b64, history)
+        except TranslationServiceError:
+            raise
         except Exception as exc:
             logging.error("SambaNova image translation failed: %s", exc)
-            pass
+            raise TranslationServiceError(str(exc))
 
         translation_duration_ms = (time.perf_counter() - translate_start) * 1000
 
@@ -182,7 +185,11 @@ class SambaNovaTranslationService(TranslationService):
             key for key in self._keys_rotation_order() if self._is_key_available(key)
         ]
         if not keys_to_try:
-            return ""
+            raise TranslationServiceError(
+                "All SambaNova API keys are cooling down; retry later"
+            )
+
+        last_error = None
 
         for api_key in keys_to_try:
             self._set_client_api_key(api_key)
@@ -222,14 +229,17 @@ class SambaNovaTranslationService(TranslationService):
                     )
                     return result
             except Exception as exc:
-                logging.debug(
-                    "SambaNova image translation failed with key %s: %s",
+                logging.warning(
+                    "SambaNova image translation attempt failed with key %s: %s",
                     masked_key,
                     exc,
                 )
+                last_error = exc
                 self._handle_provider_error(api_key, exc)
                 continue
 
+        if last_error:
+            raise TranslationServiceError(f"SambaNova translation failed: {last_error}")
         return ""
 
     def switch_service(self, service_name: str) -> bool:

@@ -22,6 +22,7 @@ import logging
 import ctypes
 from ctypes import wintypes
 import collections
+import time
 
 from core.config_manager import ConfigManager
 from core.log_buffer import flush_logs
@@ -41,6 +42,7 @@ VK_Q = 0x51  # 'Q' key
 VK_K = 0x4B  # 'K' key
 VK_L = 0x4C  # 'L' key
 VK_S = 0x53  # 'S' key
+VK_C = 0x43  # 'C' key
 ALT_T_HOTKEY_ID = 1  # Hotkey ID for Alt+T visibility toggle
 ALT_Q_HOTKEY_ID = 2  # Hotkey ID for Alt+Q select area
 TILDE_HOTKEY_ID = 3  # Hotkey ID for '~' toggle live translation
@@ -48,6 +50,7 @@ ALT_K_HOTKEY_ID = 6  # Hotkey ID for Alt+K set API key
 ALT_L_HOTKEY_ID = 7  # Hotkey ID for Alt+L set language
 ALT_S_HOTKEY_ID = 9  # Hotkey ID for Alt+S change service
 ALT_TILDE_HOTKEY_ID = 10  # Hotkey ID for Alt+~ auto translation toggle
+ALT_C_HOTKEY_ID = 11  # Hotkey ID for Alt+C clear session
 # Window positioning flags for no-activate topmost overlay
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -76,13 +79,12 @@ class TranslatorApp(QMainWindow):
         screen_geometry = QApplication.primaryScreen().availableGeometry()
         width = self.config.overlay_width
         height = self.config.overlay_height
-        # Position with margin from edges to ensure it's fully visible
-        self.setGeometry(
-            screen_geometry.left(),
-            screen_geometry.bottom() - height - 50,
-            width,
-            height,
-        )
+        x = self.config.overlay_x
+        y = self.config.overlay_y
+        if x is None or y is None:
+            x = screen_geometry.left()
+            y = screen_geometry.bottom() - height - 50
+        self.setGeometry(x, y, width, height)
         self.selected_region = None
         self.font_sizes = list(range(8, 52, 2))  # 8px to 50px inclusive
         # Find closest font size index from config
@@ -107,8 +109,14 @@ class TranslatorApp(QMainWindow):
         self.auto_status_label = None
         self.auto_duplicate_threshold = 1
         self.last_auto_ocr_text = ""
+        self.active_requests = {}  # timestamp -> QTimer
 
-        # Translation worker (runs in background thread, used by both manual and auto modes)
+        # Timer for debouncing geometry saves
+        self.geometry_save_timer = QTimer(self)
+        self.geometry_save_timer.setSingleShot(True)
+        self.geometry_save_timer.timeout.connect(self._save_window_geometry)
+
+        # Translation worker
         self.translation_worker_thread = QThread()
         self.translation_worker = TranslationWorker(self.config)
         self.translation_worker.moveToThread(self.translation_worker_thread)
@@ -135,6 +143,7 @@ class TranslatorApp(QMainWindow):
             "Press 'Alt+K' to set your API key\n\n"
             "Press '+' or '-' to change font size\n\n"
             "Press 'Alt+S' to switch translation service\n\n"
+            "Press 'Alt+C' to clear session\n\n"
             "Press 'Alt+T' to show or hide window\n\n"
             "Press 'Esc' to close"
         )
@@ -168,6 +177,7 @@ class TranslatorApp(QMainWindow):
             (ALT_TILDE_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_OEM_3, "Alt+~"),
             (ALT_K_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_K, "Alt+K"),
             (ALT_S_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_S, "Alt+S"),
+            (ALT_C_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_C, "Alt+C"),
         ]
 
         failed = []
@@ -394,15 +404,34 @@ class TranslatorApp(QMainWindow):
             screenshot_np = np.array(screenshot_np)
 
             # Reserve slot for pending counter
-            self._reserve_translation_slot()
+            if not self._reserve_translation_slot():
+                return
 
-            self.translation_worker.translate_frame(screenshot_np, self.selected_region)
+            timestamp = time.time()
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self._handle_translation_timeout(timestamp))
+            timer.start(30000)  # 30 seconds timeout
+            self.active_requests[timestamp] = timer
+
+            self.translation_worker.translate_frame(
+                screenshot_np, self.selected_region, manual=True, timestamp=timestamp
+            )
 
         except Exception as exc:
             logging.error("Manual translation failed: %s", exc)
             self.show_status(f"Error: {exc}")
 
     def on_translation_finished(self, translation_text, timestamp, image_hash):
+        # Check if request is still active (hasn't timed out)
+        if timestamp in self.active_requests:
+            timer = self.active_requests.pop(timestamp)
+            timer.stop()
+            timer.deleteLater()
+        else:
+            # Request timed out or invalid, ignore result
+            return
+
         if timestamp < self.last_update_timestamp:
             self._update_pending_after_completion()
             return
@@ -437,7 +466,16 @@ class TranslatorApp(QMainWindow):
                 self.last_processed_hash = image_hash
             self._update_pending_after_completion("No text detected in selected area")
 
-    def on_translation_error(self, error_message):
+    def on_translation_error(self, error_message, timestamp):
+        # Check if request is still active (hasn't timed out)
+        if timestamp in self.active_requests:
+            timer = self.active_requests.pop(timestamp)
+            timer.stop()
+            timer.deleteLater()
+        else:
+            # Request timed out or invalid, ignore error
+            return
+
         if (
             self.auto_translation_enabled
             and "no text detected" in error_message.lower()
@@ -575,6 +613,13 @@ class TranslatorApp(QMainWindow):
             self._reload_translation_service()
             self.show_status(f"Service switched to: {selection}", persistent=True)
 
+    def clear_session(self):
+        self.text_edit.clear()
+        self.last_translation_result = None
+        self.last_processed_hash = None
+        self.translation_history.clear()
+        self.show_status("Session cleared")
+
     def _reload_translation_service(self):
         try:
             self.config.translation_service = self.config.translation_service
@@ -666,10 +711,22 @@ class TranslatorApp(QMainWindow):
             if screenshot_np is None:
                 return
 
-            self._reserve_translation_slot()
+            if not self._reserve_translation_slot():
+                logging.debug("Skipping auto-translation: max pending requests reached")
+                return
+
+            timestamp = time.time()
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self._handle_translation_timeout(timestamp))
+            timer.start(30000)  # 30 seconds timeout
+            self.active_requests[timestamp] = timer
 
             self.translation_worker.translate_frame(
-                screenshot_np, self.selected_region, precomputed_ocr=ocr_data
+                screenshot_np,
+                self.selected_region,
+                precomputed_ocr=ocr_data,
+                timestamp=timestamp,
             )
 
         except Exception as exc:
@@ -738,10 +795,21 @@ class TranslatorApp(QMainWindow):
             else:
                 self.clear_status()
 
-    def _reserve_translation_slot(self) -> None:
+    def _reserve_translation_slot(self) -> bool:
+        if self.pending_translations >= 4:
+            return False
         self.pending_translations += 1
         self._update_translating_status()
         QApplication.processEvents()
+        return True
+
+    def _handle_translation_timeout(self, timestamp):
+        if timestamp in self.active_requests:
+            timer = self.active_requests.pop(timestamp)
+            timer.stop()
+            timer.deleteLater()
+            logging.warning(f"Translation request {timestamp} timed out after 30s")
+            self._update_pending_after_completion("Translation timed out")
 
     def eventFilter(self, obj, event):
         # Ensure '+' and '-' are not swallowed by the shortcut system
@@ -797,6 +865,8 @@ class TranslatorApp(QMainWindow):
                     self.set_api_key()
                 elif msg.wParam == ALT_S_HOTKEY_ID:
                     self.change_service()
+                elif msg.wParam == ALT_C_HOTKEY_ID:
+                    self.clear_session()
         return super().nativeEvent(eventType, message)
 
     def closeEvent(self, event):
@@ -807,11 +877,17 @@ class TranslatorApp(QMainWindow):
             user32.UnregisterHotKey(self.hwnd, TILDE_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, ALT_L_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, ALT_TILDE_HOTKEY_ID)
+            user32.UnregisterHotKey(self.hwnd, ALT_C_HOTKEY_ID)
         except Exception:
             pass
 
         # Stop auto translation monitor
         self._stop_auto_translation()
+
+        # Ensure any pending geometry save is completed
+        if self.geometry_save_timer.isActive():
+            self.geometry_save_timer.stop()
+            self._save_window_geometry()
 
         # Cleanup translation worker thread
         if hasattr(self, "translation_worker") and self.translation_worker:
@@ -838,8 +914,22 @@ class TranslatorApp(QMainWindow):
         event.accept()
 
     def resizeEvent(self, event):
-        """Save overlay dimensions when window is resized."""
         super().resizeEvent(event)
-        new_size = event.size()
-        self.config.overlay_width = new_size.width()
-        self.config.overlay_height = new_size.height()
+        # Restart the debounce timer
+        self.geometry_save_timer.start(500)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self.geometry_save_timer.start(500)
+
+    def _save_window_geometry(self):
+        """Save current window geometry to config."""
+        pos = self.pos()
+        size = self.size()
+        self.config.overlay_x = pos.x()
+        self.config.overlay_y = pos.y()
+        self.config.overlay_width = size.width()
+        self.config.overlay_height = size.height()
+        logging.info(
+            f"Window geometry saved: {size.width()}x{size.height()} at ({pos.x()}, {pos.y()})"
+        )
