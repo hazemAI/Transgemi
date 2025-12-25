@@ -2,7 +2,7 @@
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/90de884e-d1c1-4feb-a3d0-0878dfe68bf9" controls="controls" style="max-width: 720px;"></video>
+<video src="https://github.com/user-attachments/assets/93a2816f-c091-4567-9243-29b6a52ba45f" controls="controls" style="max-width: 720px;"></video>
 
 A simple, on-the-fly screen translator that uses WinOCR (or RapidOCR for Asian languages) and LLM API services (Gemini, OpenRouter, Groq, etc.) to translate text from a selected area of your screen.
 
@@ -60,6 +60,7 @@ python main.py
 | **`Alt + S`**   | **Switch Service**: Cycle through available translation services (Gemini, OpenRouter, etc.). |
 | **`Alt + K`**   | **Update API Key**: Quickly update the key for the current service.                          |
 | **`Alt + T`**   | **Toggle Visibility**: Hide/Show the translation overlay.                                    |
+| **`Alt + C`**   | **Clear Session**: Clear the current translation text and history.                           |
 | **`+` / `-`**   | **Font Size**: Increase or decrease text size.                                               |
 | **`Esc`**       | **Exit**: Close the application.                                                             |
 

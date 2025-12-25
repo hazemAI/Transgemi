@@ -9,7 +9,7 @@
 ## Core Features
 
 - Region selection overlay with Alt+Q and visual rubber-band feedback for choosing the subtitle area
-- Hotkey-driven workflow for capture, translation trigger (~), API key entry (Alt+K), source language (Alt+L), service switching (Alt+S), visibility toggling (Alt+T), auto-translation toggle (Alt+~), and font size adjustment (+/-)
+- Hotkey-driven workflow for capture, translation trigger (~), API key entry (Alt+K), source language (Alt+L), service switching (Alt+S), visibility toggling (Alt+T), auto-translation toggle (Alt+~), session clearing (Alt+C), and font size adjustment (+/-)
 - Background worker that hashes captures, caches responses, and avoids duplicate translations for efficiency
 - Auto-translation mode with OCR-based text stability detection (2-frame consistency check) and similarity-based duplicate rejection
 - Source language selection (Alt+L) that routes to RapidOCR for Chinese and WinOCR for English/Japanese
@@ -112,7 +112,7 @@ Set the following environment variables in `.env` (defaults shown):
 4. Press **~** to trigger manual translation; the worker captures, OCRs, and calls the configured service.
 5. Press **Alt+~** to toggle auto-translation mode.
 6. Monitor translations in the overlay; cached results prevent duplicate API calls.
-7. Use **Alt+S** to switch between Gemini, OpenRouter, Groq, SambaNova, and Cerebras, **Alt+K** to update API keys, and **Alt+T** to toggle visibility.
+7. Use **Alt+S** to switch between Gemini, OpenRouter, Groq, SambaNova, and Cerebras, **Alt+K** to update API keys, **Alt+C** to clear the session, and **Alt+T** to toggle visibility.
 
 ## Logging & Diagnostics
 
