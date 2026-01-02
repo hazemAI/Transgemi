@@ -34,23 +34,24 @@ from threads.auto_ocr_monitor import AutoOCRMonitor
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 WM_HOTKEY = 0x0312
 MOD_NOREPEAT = 0x4000
-MOD_ALT = 0x0001  # Alt key
-# Virtual Key Codes
-VK_OEM_3 = 0xC0  # ~ key
-VK_T = 0x54  # 'T' key
-VK_Q = 0x51  # 'Q' key
-VK_K = 0x4B  # 'K' key
-VK_L = 0x4C  # 'L' key
-VK_S = 0x53  # 'S' key
-VK_C = 0x43  # 'C' key
-ALT_T_HOTKEY_ID = 1  # Hotkey ID for Alt+T visibility toggle
-ALT_Q_HOTKEY_ID = 2  # Hotkey ID for Alt+Q select area
-TILDE_HOTKEY_ID = 3  # Hotkey ID for '~' toggle live translation
-ALT_K_HOTKEY_ID = 6  # Hotkey ID for Alt+K set API key
-ALT_L_HOTKEY_ID = 7  # Hotkey ID for Alt+L set language
-ALT_S_HOTKEY_ID = 9  # Hotkey ID for Alt+S change service
-ALT_TILDE_HOTKEY_ID = 10  # Hotkey ID for Alt+~ auto translation toggle
-ALT_C_HOTKEY_ID = 11  # Hotkey ID for Alt+C clear session
+MOD_ALT = 0x0001
+MOD_CTRL = 0x0002
+VK_OEM_3 = 0xC0
+VK_T = 0x54
+VK_Q = 0x51
+VK_K = 0x4B
+VK_L = 0x4C
+VK_S = 0x53
+VK_C = 0x43
+ALT_T_HOTKEY_ID = 1
+ALT_Q_HOTKEY_ID = 2
+TILDE_HOTKEY_ID = 3
+CTRL_TILDE_HOTKEY_ID = 4
+ALT_K_HOTKEY_ID = 6
+ALT_L_HOTKEY_ID = 7
+ALT_S_HOTKEY_ID = 9
+ALT_TILDE_HOTKEY_ID = 10
+ALT_C_HOTKEY_ID = 11
 # Window positioning flags for no-activate topmost overlay
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -138,7 +139,7 @@ class TranslatorApp(QMainWindow):
             "Transgemi - Subtitle Translator\n\n"
             "Press 'Alt+Q' to select subtitle area\n"
             "Press 'Alt+X' to cancel selection\n\n"
-            "Press '~' to translate selected area\n\n"
+            "Press '~' or 'Ctrl+~' to translate selected area\n\n"
             "Press 'Alt+~' to switch between auto/manual translation\n\n"
             "Press 'Alt+K' to set your API key\n\n"
             "Press '+' or '-' to change font size\n\n"
@@ -173,6 +174,7 @@ class TranslatorApp(QMainWindow):
             (self.alt_t_hotkey_id, MOD_ALT | MOD_NOREPEAT, VK_T, "Alt+T"),
             (ALT_Q_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_Q, "Alt+Q"),
             (TILDE_HOTKEY_ID, MOD_NOREPEAT, VK_OEM_3, "~"),
+            (CTRL_TILDE_HOTKEY_ID, MOD_CTRL | MOD_NOREPEAT, VK_OEM_3, "Ctrl+~"),
             (ALT_L_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_L, "Alt+L"),
             (ALT_TILDE_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_OEM_3, "Alt+~"),
             (ALT_K_HOTKEY_ID, MOD_ALT | MOD_NOREPEAT, VK_K, "Alt+K"),
@@ -857,6 +859,8 @@ class TranslatorApp(QMainWindow):
                     self.select_region()
                 elif msg.wParam == TILDE_HOTKEY_ID:
                     self.translate_selected()
+                elif msg.wParam == CTRL_TILDE_HOTKEY_ID:
+                    self.translate_selected()
                 elif msg.wParam == ALT_L_HOTKEY_ID:
                     self.set_language()
                 elif msg.wParam == ALT_TILDE_HOTKEY_ID:
@@ -875,6 +879,7 @@ class TranslatorApp(QMainWindow):
             user32.UnregisterHotKey(self.hwnd, self.alt_t_hotkey_id)
             user32.UnregisterHotKey(self.hwnd, ALT_Q_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, TILDE_HOTKEY_ID)
+            user32.UnregisterHotKey(self.hwnd, CTRL_TILDE_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, ALT_L_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, ALT_TILDE_HOTKEY_ID)
             user32.UnregisterHotKey(self.hwnd, ALT_C_HOTKEY_ID)

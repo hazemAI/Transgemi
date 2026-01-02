@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,7 @@ class GroqTranslationService(TranslationService):
         self._current_key_index = 0
         self._set_client_api_key(self._groq_api_keys[self._current_key_index])
         self._key_cooldowns: Dict[str, float] = {}
+        self._key_daily_exhausted: Dict[str, float] = {}
 
     def _initialize_api_keys(self) -> List[str]:
         keys: List[str] = []
@@ -65,6 +67,16 @@ class GroqTranslationService(TranslationService):
         return rotation
 
     def _is_key_available(self, api_key: str) -> bool:
+        daily_until = self._key_daily_exhausted.get(api_key)
+        if daily_until is not None:
+            if time.time() >= daily_until:
+                del self._key_daily_exhausted[api_key]
+                logging.info(
+                    "Groq key %s TPD cooldown expired, now available",
+                    self._mask_key(api_key),
+                )
+            else:
+                return False
         cooldown_until = self._key_cooldowns.get(api_key)
         if cooldown_until is None:
             return True
@@ -82,6 +94,24 @@ class GroqTranslationService(TranslationService):
                 self._groq_api_keys
             )
 
+    def _parse_retry_time(self, detail: str) -> Optional[float]:
+        match = re.search(r"try again in ([\d.]+)s", detail)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+        return None
+
+    def _mark_key_daily_exhausted(self, api_key: str, seconds: float) -> None:
+        self._key_daily_exhausted[api_key] = time.time() + seconds
+        hours = seconds / 3600
+        logging.warning(
+            "Groq key %s hit daily token limit (TPD), cooling down for %.1f hours",
+            self._mask_key(api_key),
+            hours,
+        )
+
     def _remove_key(self, api_key: str) -> None:
         if api_key in self._groq_api_keys:
             logging.warning(
@@ -90,6 +120,7 @@ class GroqTranslationService(TranslationService):
             )
             self._groq_api_keys.remove(api_key)
             self._key_cooldowns.pop(api_key, None)
+            self._key_daily_exhausted.pop(api_key, None)
             if not self._groq_api_keys:
                 raise ValueError("All Groq API keys are invalid or unavailable")
             self._current_key_index %= len(self._groq_api_keys)
@@ -254,6 +285,13 @@ class GroqTranslationService(TranslationService):
             self._remove_key(api_key)
             return
 
+        if "tokens per day" in detail or "(tpd)" in detail:
+            retry_seconds = self._parse_retry_time(detail)
+            cooldown = retry_seconds if retry_seconds else 7200
+            self._mark_key_daily_exhausted(api_key, cooldown)
+            self._advance_index(api_key)
+            return
+
         rate_limit_tokens = (
             "rate limit",
             "too many requests",
@@ -263,4 +301,3 @@ class GroqTranslationService(TranslationService):
         )
         if any(token in detail for token in rate_limit_tokens):
             self._mark_key_cooldown(api_key)
-        self._advance_index(api_key)
